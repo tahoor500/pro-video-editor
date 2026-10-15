@@ -1,99 +1,241 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:gal/gal.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 
-void main() => runApp(const ArgonCutUltraApp());
+void main() => runApp(const ArgonCutCapCutApp());
 
-class ArgonCutUltraApp extends StatelessWidget {
-  const ArgonCutUltraApp({super.key});
+String globalGeminiApiKey = '';
+
+class ArgonCutCapCutApp extends StatelessWidget {
+  const ArgonCutCapCutApp({super.key});
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ArgonCut Ultra Pro',
+      title: 'ArgonCut Pro',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF08090C),
+        scaffoldBackgroundColor: const Color(0xFF0A0B0E),
         colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF00F2FE),
+          primary: Color(0xFF00E5FF),
           secondary: Color(0xFF7C4DFF),
         ),
       ),
-      home: const HomeDashboardScreen(),
+      home: const CapCutHomeScreen(),
     );
   }
 }
 
-class ProjectDraft {
-  String id, title, resolution, ratio;
-  String? videoPath;
-  ProjectDraft({required this.id, required this.title, this.videoPath, this.resolution = '4K HDR', this.ratio = '9:16'});
+// ==========================================
+// UNDO / REDO SNAPSHOT STATE MODEL
+// ==========================================
+class EditorStateSnapshot {
+  final double startTrim, endTrim, speed, brightness, contrast, saturation, videoZoom;
+  final bool isMirrored, isReversed, isMuted, chromaKey, noiseReduction, fadeTransition, cinemaMask;
+  final int rotTurns, filterIdx;
+  final String overlayText, bilingualText, voiceFx, aspectRatio;
+  final List<double> splits, keyframes, beats;
+
+  EditorStateSnapshot({
+    required this.startTrim,
+    required this.endTrim,
+    required this.speed,
+    required this.brightness,
+    required this.contrast,
+    required this.saturation,
+    required this.videoZoom,
+    required this.isMirrored,
+    required this.isReversed,
+    required this.isMuted,
+    required this.chromaKey,
+    required this.noiseReduction,
+    required this.fadeTransition,
+    required this.cinemaMask,
+    required this.rotTurns,
+    required this.filterIdx,
+    required this.overlayText,
+    required this.bilingualText,
+    required this.voiceFx,
+    required this.aspectRatio,
+    required this.splits,
+    required this.keyframes,
+    required this.beats,
+  });
 }
 
-class HomeDashboardScreen extends StatefulWidget {
-  const HomeDashboardScreen({super.key});
+// ==========================================
+// 1. CAPCUT STYLE HOME & CLOUD AI HUB
+// ==========================================
+class CapCutHomeScreen extends StatefulWidget {
+  const CapCutHomeScreen({super.key});
   @override
-  State<HomeDashboardScreen> createState() => _HomeDashboardScreenState();
+  State<CapCutHomeScreen> createState() => _CapCutHomeScreenState();
 }
 
-class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
-  int _navIdx = 0;
+class _CapCutHomeScreenState extends State<CapCutHomeScreen> {
   final ImagePicker _picker = ImagePicker();
-  final List<ProjectDraft> _drafts = [
-    ProjectDraft(id: 'd1', title: 'Cinematic Vlog Reel #1', resolution: '4K 60fps', ratio: '9:16'),
-    ProjectDraft(id: 'd2', title: 'YouTube Gaming Intro', resolution: '1080p HD', ratio: '16:9'),
-  ];
+  final List<Map<String, String>> _drafts = [];
 
-  Future<void> _startProject({ImageSource src = ImageSource.gallery, String? title}) async {
-    final XFile? p = await _picker.pickVideo(source: src);
-    if (p != null) {
-      final d = ProjectDraft(id: 'd_${DateTime.now().millisecondsSinceEpoch}', title: title ?? 'Project ${_drafts.length + 1}', videoPath: p.path);
-      setState(() => _drafts.insert(0, d));
+  Future<void> _pickAndOpenEditor({ImageSource src = ImageSource.gallery, String? presetTitle}) async {
+    final XFile? picked = await _picker.pickVideo(source: src);
+    if (picked != null) {
+      final title = presetTitle ?? 'Project ${_drafts.length + 1}';
+      setState(() {
+        _drafts.insert(0, {'title': title, 'path': picked.path, 'time': 'Just now'});
+      });
       if (mounted) {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => UltraEditorScreen(draft: d))).then((_) => setState(() {}));
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => CapCutProEditor(videoPath: picked.path, projectTitle: title)),
+        );
       }
     }
   }
 
-  void _openAIPromptSheet(String title, String desc) {
-    final ctrl = TextEditingController();
-    showModalBottomSheet(
+  void _openCloudKeyDialog() {
+    final ctrl = TextEditingController(text: globalGeminiApiKey);
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF12151E),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(left: 18, right: 18, top: 18, bottom: MediaQuery.of(ctx).viewInsets.bottom + 20),
-        child: Column(
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF141720),
+        title: const Row(
+          children: [
+            Icon(Icons.cloud_done_rounded, color: Color(0xFF00E5FF)),
+            SizedBox(width: 8),
+            Text('Cloud AI Setup', style: TextStyle(fontSize: 17)),
+          ],
+        ),
+        content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('✨ $title', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF00F2FE))),
-            const SizedBox(height: 6),
-            Text(desc, style: const TextStyle(fontSize: 12, color: Colors.white70)),
-            const SizedBox(height: 12),
+            const Text(
+              'آن لائن AI فیچرز (Script to Video, Auto Captions, Urdu Translation) چلانے کے لیے اپنی مفت Google Gemini API Key درج کریں:',
+              style: TextStyle(fontSize: 12, color: Colors.white70),
+            ),
+            const SizedBox(height: 10),
             TextField(
               controller: ctrl,
-              maxLines: 2,
-              decoration: InputDecoration(hintText: 'Enter prompt or script here...', filled: true, fillColor: const Color(0xFF1C202E), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
-            ),
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00F2FE), foregroundColor: Colors.black),
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _startProject(title: title);
-                },
-                icon: const Icon(Icons.auto_awesome),
-                label: const Text('Generate & Open Timeline', style: TextStyle(fontWeight: FontWeight.bold)),
+              decoration: InputDecoration(
+                hintText: 'AIzaSy...',
+                filled: true,
+                fillColor: const Color(0xFF1E2230),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               ),
             ),
           ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E5FF), foregroundColor: Colors.black),
+            onPressed: () {
+              globalGeminiApiKey = ctrl.text.trim();
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('☁️ Cloud AI Connected Successfully!'), backgroundColor: Colors.teal),
+              );
+            },
+            child: const Text('Save Key', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _runCloudAIScriptGenerator() async {
+    final promptCtrl = TextEditingController();
+    String aiResult = '';
+    bool loading = false;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF141720),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setM) => Padding(
+          padding: EdgeInsets.only(left: 18, right: 18, top: 18, bottom: MediaQuery.of(ctx).viewInsets.bottom + 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.auto_awesome, color: Color(0xFF00E5FF)),
+                  SizedBox(width: 8),
+                  Text('Online AI Script & Captions Generator', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: promptCtrl,
+                decoration: InputDecoration(
+                  hintText: 'اپنی ویڈیو کا ٹاپک لکھیں (مثلاً: Top 3 Mobile Tips)...',
+                  filled: true,
+                  fillColor: const Color(0xFF1E2230),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (loading) const Center(child: CircularProgressIndicator()),
+              if (aiResult.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(8)),
+                  child: Text(aiResult, style: const TextStyle(fontSize: 12, color: Color(0xFF00E5FF))),
+                ),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E5FF), foregroundColor: Colors.black),
+                  onPressed: () async {
+                    if (promptCtrl.text.trim().isEmpty) return;
+                    setM(() => loading = true);
+                    try {
+                      if (globalGeminiApiKey.isNotEmpty) {
+                        final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$globalGeminiApiKey');
+                        final resp = await http.post(
+                          url,
+                          headers: {'Content-Type': 'application/json'},
+                          body: jsonEncode({
+                            'contents': [
+                              {
+                                'parts': [
+                                  {'text': 'Write a short 3-line catchy viral reel script with Urdu/English captions for: ${promptCtrl.text}'}
+                                ]
+                              }
+                            ]
+                          }),
+                        );
+                        final data = jsonDecode(resp.body);
+                        aiResult = data['candidates']?[0]?['content']?['parts']?[0]?['text'] ?? 'Cloud Script Generated!';
+                      } else {
+                        final url = Uri.parse('https://api.mymemory.translated.net/get?q=${Uri.encodeComponent(promptCtrl.text)}&langpair=en|ur');
+                        final resp = await http.get(url);
+                        final data = jsonDecode(resp.body);
+                        final trans = data['responseData']?['translatedText'] ?? promptCtrl.text;
+                        aiResult = '🎬 Hook: ${promptCtrl.text}\n💬 Urdu Caption: $trans\n🔥 Call to Action: Follow & Share!';
+                      }
+                    } catch (e) {
+                      aiResult = 'Cloud Error: Check internet connection ($e)';
+                    }
+                    setM(() => loading = false);
+                  },
+                  icon: const Icon(Icons.cloud_sync),
+                  label: const Text('Generate Live from Cloud', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -103,228 +245,205 @@ class _HomeDashboardScreenState extends State<HomeDashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0D0F16),
+        backgroundColor: const Color(0xFF0A0B0E),
+        elevation: 0,
         title: const Row(
           children: [
-            Icon(Icons.bolt_rounded, color: Color(0xFF00F2FE)),
-            SizedBox(width: 6),
-            Text('ArgonCut Ultra', style: TextStyle(fontWeight: FontWeight.w900)),
+            Icon(Icons.content_cut_rounded, color: Color(0xFF00E5FF)),
+            SizedBox(width: 8),
+            Text('ArgonCut', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 21)),
           ],
         ),
+        actions: [
+          TextButton.icon(
+            onPressed: _openCloudKeyDialog,
+            icon: const Icon(Icons.cloud_outlined, color: Color(0xFF00E5FF), size: 18),
+            label: const Text('Cloud AI Key', style: TextStyle(color: Color(0xFF00E5FF), fontSize: 12)),
+          ),
+        ],
       ),
-      body: _navIdx == 1 ? _templatesTab() : (_navIdx == 2 ? _stockTab() : (_navIdx == 3 ? _aiHubTab() : _homeDraftsTab())),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _navIdx,
-        backgroundColor: const Color(0xFF0D0F16),
-        selectedItemColor: const Color(0xFF00F2FE),
-        unselectedItemColor: Colors.white54,
-        type: BottomNavigationBarType.fixed,
-        onTap: (i) => setState(() => _navIdx = i),
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.video_library_rounded), label: 'Edit & Drafts'),
-          BottomNavigationBarItem(icon: Icon(Icons.dashboard_customize_rounded), label: 'Templates'),
-          BottomNavigationBarItem(icon: Icon(Icons.perm_media_rounded), label: 'Stock Media'),
-          BottomNavigationBarItem(icon: Icon(Icons.auto_awesome_rounded), label: 'AI Studio'),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // CapCut Big New Project Card
+          GestureDetector(
+            onTap: () => _pickAndOpenEditor(src: ImageSource.gallery),
+            child: Container(
+              height: 130,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [Color(0xFF00E5FF), Color(0xFF2979FF)]),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [BoxShadow(color: const Color(0xFF00E5FF).withOpacity(0.25), blurRadius: 18, offset: const Offset(0, 6))],
+              ),
+              child: const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.add_box_rounded, size: 44, color: Colors.black),
+                  SizedBox(height: 6),
+                  Text('New Project', style: TextStyle(color: Colors.black, fontSize: 20, fontWeight: FontWeight.w900)),
+                  Text('Pinch Zoom Timeline • Undo/Redo • Real FFmpeg Export', style: TextStyle(color: Colors.black87, fontSize: 11, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // CapCut Top Tools Row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _homeToolBtn(Icons.videocam_rounded, 'Camera', () => _pickAndOpenEditor(src: ImageSource.camera, presetTitle: 'Camera Shot')),
+              _homeToolBtn(Icons.auto_awesome_rounded, 'Cloud Script', _runCloudAIScriptGenerator),
+              _homeToolBtn(Icons.closed_caption_rounded, 'Auto Captions', () => _pickAndOpenEditor(presetTitle: 'Cloud Captions')),
+              _homeToolBtn(Icons.audiotrack_rounded, 'Extract MP3', () => _pickAndOpenEditor(presetTitle: 'Audio Extract')),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          const Text('Recent Drafts', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          if (_drafts.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(28),
+              decoration: BoxDecoration(color: const Color(0xFF141720), borderRadius: BorderRadius.circular(16)),
+              alignment: Alignment.center,
+              child: const Text('ابھی کوئی ڈرافٹ نہیں ہے۔ اوپر "New Project" پر کلک کر کے ویڈیو منتخب کریں!', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54, fontSize: 13)),
+            )
+          else
+            ..._drafts.map((d) => Card(
+                  color: const Color(0xFF141720),
+                  margin: const EdgeInsets.only(bottom: 10),
+                  child: ListTile(
+                    leading: const Icon(Icons.movie_creation_rounded, color: Color(0xFF00E5FF), size: 32),
+                    title: Text(d['title']!, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text(d['time']!, style: const TextStyle(fontSize: 11, color: Colors.white54)),
+                    trailing: const Icon(Icons.chevron_right, color: Color(0xFF00E5FF)),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => CapCutProEditor(videoPath: d['path']!, projectTitle: d['title']!)),
+                    ),
+                  ),
+                )),
         ],
       ),
     );
   }
 
-  Widget _homeDraftsTab() {
-    final shortcuts = [
-      {'i': Icons.auto_fix_high, 't': 'Auto Cutout'},
-      {'i': Icons.description, 't': 'Script to Vid'},
-      {'i': Icons.bolt, 't': 'Long to Short'},
-      {'i': Icons.subtitles, 't': 'Auto Captions'},
-      {'i': Icons.videocam, 't': 'Camera Rec'},
-      {'i': Icons.edit_note, 't': 'Transcript Edit'},
-      {'i': Icons.hd, 't': 'AI 4K Upscale'},
-      {'i': Icons.translate, 't': 'AI Translator'},
-    ];
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        GestureDetector(
-          onTap: () => _startProject(),
-          child: Container(
-            height: 125,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(colors: [Color(0xFF00F2FE), Color(0xFF7C4DFF)]),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: const Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.add_circle_rounded, size: 42, color: Colors.black),
-                SizedBox(height: 6),
-                Text('New Project', style: TextStyle(color: Colors.black, fontSize: 19, fontWeight: FontWeight.w900)),
-                Text('Multi-Layer Timeline • 4K 60fps • AI Tools', style: TextStyle(color: Colors.black87, fontSize: 11, fontWeight: FontWeight.w600)),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 4, mainAxisSpacing: 8, crossAxisSpacing: 8),
-          itemCount: shortcuts.length,
-          itemBuilder: (ctx, i) => InkWell(
-            onTap: () {
-              final label = shortcuts[i]['t'] as String;
-              if (label == 'Camera Rec') {
-                _startProject(src: ImageSource.camera, title: 'Camera Clip');
-              } else {
-                _openAIPromptSheet(label, 'AI powered automatic processing for $label');
-              }
-            },
-            child: Container(
-              decoration: BoxDecoration(color: const Color(0xFF141824), borderRadius: BorderRadius.circular(12)),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(shortcuts[i]['i'] as IconData, color: const Color(0xFF00F2FE), size: 24),
-                  const SizedBox(height: 4),
-                  Text(shortcuts[i]['t'] as String, textAlign: TextAlign.center, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
-                ],
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 18),
-        Text('Saved Drafts & Projects (${_drafts.length})', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        ..._drafts.map((d) => Card(
-              color: const Color(0xFF141824),
-              child: ListTile(
-                leading: const Icon(Icons.movie_creation_outlined, color: Color(0xFF00F2FE)),
-                title: Text(d.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text('${d.resolution} • ${d.ratio} • Draft'),
-                trailing: IconButton(icon: const Icon(Icons.delete_outline), onPressed: () => setState(() => _drafts.remove(d))),
-                onTap: () => d.videoPath != null
-                    ? Navigator.push(context, MaterialPageRoute(builder: (_) => UltraEditorScreen(draft: d)))
-                    : _startProject(title: d.title),
-              ),
-            )),
-      ],
-    );
-  }
-
-  Widget _templatesTab() {
-    final list = ['Velocity Beat Flash (9:16)', '3D Photo Zoom (9:16)', 'Cyberpunk Glitch Intro (16:9)', 'Cinematic LUT Reel (9:16)', 'Bilingual Podcast Shorts', 'Split Clone Double Role'];
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: list.length,
-      itemBuilder: (ctx, i) => Card(
-        color: const Color(0xFF141824),
-        child: ListTile(
-          leading: const Icon(Icons.play_circle_fill, color: Color(0xFF00F2FE), size: 32),
-          title: Text(list[i], style: const TextStyle(fontWeight: FontWeight.bold)),
-          subtitle: const Text('Ready-to-Use Trending CapCut Template'),
-          trailing: ElevatedButton(onPressed: () => _startProject(title: list[i]), child: const Text('Use')),
-        ),
-      ),
-    );
-  }
-
-  Widget _stockTab() {
-    final stocks = ['4K Neon City Drone', 'Green Screen Subscribe Button', 'Cinematic Dust Overlay', 'Glitch TV Static Loop', 'Lo-Fi Background Visual'];
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: stocks.length,
-      itemBuilder: (ctx, i) => Card(
-        color: const Color(0xFF141824),
-        child: ListTile(
-          leading: const Icon(Icons.hd_rounded, color: Color(0xFF00F2FE)),
-          title: Text(stocks[i]),
-          subtitle: const Text('Royalty-Free 4K Stock Media'),
-          trailing: ElevatedButton(onPressed: () => _startProject(title: stocks[i]), child: const Text('Import')),
-        ),
-      ),
-    );
-  }
-
-  Widget _aiHubTab() {
-    final aiList = [
-      'Auto Cutout (BG Remover)', 'Custom Brush Cutout', 'Script to Video AI', 'Long Video to Shorts',
-      'AI Avatars & Characters', 'Auto Reframe 9:16', 'Camera Motion Tracking', 'AI 4K Video Upscaler',
-      'AI 3D Movement', 'Remove Flicker', 'AI Relight Studio', 'AI Video Lip-Sync Translator'
-    ];
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: aiList.length,
-      itemBuilder: (ctx, i) => Card(
-        color: const Color(0xFF141824),
-        child: ListTile(
-          leading: const Icon(Icons.auto_awesome, color: Color(0xFF00F2FE)),
-          title: Text(aiList[i], style: const TextStyle(fontWeight: FontWeight.bold)),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _openAIPromptSheet(aiList[i], 'Configure and apply ${aiList[i]} to your clip.'),
+  Widget _homeToolBtn(IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        width: 78,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(color: const Color(0xFF141720), borderRadius: BorderRadius.circular(14)),
+        child: Column(
+          children: [
+            Icon(icon, color: const Color(0xFF00E5FF), size: 24),
+            const SizedBox(height: 6),
+            Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+          ],
         ),
       ),
     );
   }
 }
 
-class UltraEditorScreen extends StatefulWidget {
-  final ProjectDraft draft;
-  const UltraEditorScreen({super.key, required this.draft});
+// =========================================================
+// 2. CAPCUT PRO EDITOR (PINCH ZOOM, UNDO/REDO, REAL FFMPEG)
+// =========================================================
+class CapCutProEditor extends StatefulWidget {
+  final String videoPath;
+  final String projectTitle;
+  const CapCutProEditor({super.key, required this.videoPath, required this.projectTitle});
+
   @override
-  State<UltraEditorScreen> createState() => _UltraEditorScreenState();
+  State<CapCutProEditor> createState() => _CapCutProEditorState();
 }
 
-class _UltraEditorScreenState extends State<UltraEditorScreen> {
+class _CapCutProEditorState extends State<CapCutProEditor> {
   VideoPlayerController? _controller;
-  File? _videoFile;
-  final ImagePicker _picker = ImagePicker();
+  late File _videoFile;
 
-  double _startTrim = 0.0, _endTrim = 1000.0, _playbackSpeed = 1.0, _cropZoom = 1.0, _maskFactor = 0.75;
-  double _brightness = 0.0, _contrast = 1.0, _saturation = 1.0, _sharpen = 0.0, _aiRelight = 0.0, _faceSmooth = 0.0, _bodySlim = 0.0;
-  int _rotTurns = 0, _activeTab = 0, _lutIdx = 0, _textTempIdx = 0, _exportFps = 60;
-  bool _isFrozen = false, _isReversed = false, _isMirrored = false, _smoothOpticalFlow = false;
-  bool _aiCutout = false, _aiReframe = false, _aiTracking = false, _aiUpscale = false, _ai3DZoom = false, _aiDeflicker = false;
-  bool _voiceIso = false, _noiseRed = false, _loudNorm = false, _enhanceVoice = false, _speechToSong = false;
-  bool _chromaKey = false, _stabilize = false, _denoise = false, _exportHdr = true, _isExporting = false;
+  // Undo / Redo Stacks
+  final List<EditorStateSnapshot> _undoStack = [];
+  final List<EditorStateSnapshot> _redoStack = [];
 
-  String _speedCurve = 'None', _blendMode = 'Normal', _canvasRatio = 'Original', _aiAvatar = 'None', _aiLang = 'Original';
-  String _voiceChanger = 'Normal', _overlayText = '', _bilingualSub = '', _vfx = 'None', _bodyFx = 'None', _maskShape = 'None';
-  String _exportRes = '1080p HD', _exportFmt = 'MP4';
+  // Hand Pinch-to-Zoom Timeline & Canvas State
+  double _timelineZoom = 1.0;
+  double _baseTimelineZoom = 1.0;
+  double _videoCanvasZoom = 1.0;
+  double _baseVideoCanvasZoom = 1.0;
+  Offset _videoPanOffset = Offset.zero;
 
-  Offset _textPos = const Offset(0.5, 0.78), _stickerPos = const Offset(0.25, 0.25);
-  final List<double> _splits = [], _keyframes = [], _beats = [];
-  final List<String> _pipLayers = [], _audioTracks = ['Main Audio'], _stickers = [];
+  // Real Editable Parameters
+  double _startTrim = 0.0;
+  double _endTrim = 1000.0;
+  double _speed = 1.0;
+  double _brightness = 0.0;
+  double _contrast = 1.0;
+  double _saturation = 1.0;
+  bool _isMirrored = false;
+  bool _isReversed = false;
+  bool _isMuted = false;
+  bool _chromaKey = false;
+  bool _noiseReduction = false;
+  bool _fadeTransition = false;
+  bool _cinemaMask = false;
+  int _rotTurns = 0;
+  int _filterIdx = 0;
 
-  final List<Map<String, dynamic>> _luts = [
-    {'n': 'Original', 'b': 0.0, 'c': 1.0, 's': 1.0},
-    {'n': 'Teal & Orange', 'b': -0.02, 'c': 1.32, 's': 1.45},
-    {'n': 'Cyberpunk', 'b': 0.05, 'c': 1.42, 's': 1.9},
-    {'n': 'Vintage', 'b': 0.06, 'c': 0.92, 's': 0.68},
-    {'n': 'Noir B&W', 'b': 0.0, 'c': 1.48, 's': 0.0},
+  String _overlayText = '';
+  String _bilingualText = '';
+  double _textScale = 1.0;
+  double _baseTextScale = 1.0;
+  Offset _textPos = const Offset(0.5, 0.78);
+
+  String _voiceFx = 'Normal'; // Normal, Chipmunk, Deep Monster, Echo
+  String _aspectRatio = 'Original'; // Original, 9:16, 16:9, 1:1
+  List<double> _splits = [];
+  List<double> _keyframes = [];
+  List<double> _beats = [];
+
+  // Export State
+  String _exportRes = '1080p';
+  int _exportFps = 60;
+  String _exportFormat = 'MP4'; // MP4, MOV, MP3, GIF
+  bool _isExporting = false;
+  bool _isCloudBusy = false;
+
+  // Active Bottom Sub-Panel (-1 = Collapsed like CapCut main view)
+  int _activeToolPanel = -1;
+
+  final List<Map<String, dynamic>> _filters = [
+    {'n': 'Normal', 'b': 0.0, 'c': 1.0, 's': 1.0},
+    {'n': 'Teal & Orange', 'b': -0.02, 'c': 1.3, 's': 1.45},
+    {'n': 'Cyberpunk', 'b': 0.04, 'c': 1.4, 's': 1.85},
+    {'n': 'Vintage', 'b': 0.06, 'c': 0.9, 's': 0.65},
+    {'n': 'B&W Noir', 'b': 0.0, 'c': 1.45, 's': 0.0},
+    {'n': 'Warm Glow', 'b': 0.05, 'c': 1.15, 's': 1.5},
   ];
 
   @override
   void initState() {
     super.initState();
-    if (widget.draft.videoPath != null) _initVideo(File(widget.draft.videoPath!));
+    _videoFile = File(widget.videoPath);
+    _initPlayer();
   }
 
-  Future<void> _initVideo(File f) async {
-    _controller?.dispose();
-    final c = VideoPlayerController.file(f);
+  Future<void> _initPlayer() async {
+    final c = VideoPlayerController.file(_videoFile);
     await c.initialize();
     c.setLooping(true);
     c.addListener(() {
       if (!mounted || _controller == null) return;
-      if (_isFrozen) {
-        _controller!.pause();
-        return;
-      }
       final pos = _controller!.value.position.inMilliseconds.toDouble();
-      if (pos >= _endTrim) _controller!.seekTo(Duration(milliseconds: _startTrim.toInt()));
+      if (pos >= _endTrim) {
+        _controller!.seekTo(Duration(milliseconds: _startTrim.toInt()));
+      }
       setState(() {});
     });
     setState(() {
-      _videoFile = f;
       _controller = c;
       _startTrim = 0.0;
       _endTrim = c.value.duration.inMilliseconds.toDouble().clamp(500.0, 36000000.0);
@@ -332,9 +451,226 @@ class _UltraEditorScreenState extends State<UltraEditorScreen> {
     c.play();
   }
 
+  // ==========================================
+  // UNDO & REDO ENGINE
+  // ==========================================
+  EditorStateSnapshot _captureSnapshot() {
+    return EditorStateSnapshot(
+      startTrim: _startTrim,
+      endTrim: _endTrim,
+      speed: _speed,
+      brightness: _brightness,
+      contrast: _contrast,
+      saturation: _saturation,
+      videoZoom: _videoCanvasZoom,
+      isMirrored: _isMirrored,
+      isReversed: _isReversed,
+      isMuted: _isMuted,
+      chromaKey: _chromaKey,
+      noiseReduction: _noiseReduction,
+      fadeTransition: _fadeTransition,
+      cinemaMask: _cinemaMask,
+      rotTurns: _rotTurns,
+      filterIdx: _filterIdx,
+      overlayText: _overlayText,
+      bilingualText: _bilingualText,
+      voiceFx: _voiceFx,
+      aspectRatio: _aspectRatio,
+      splits: List.from(_splits),
+      keyframes: List.from(_keyframes),
+      beats: List.from(_beats),
+    );
+  }
+
+  void _recordChange(VoidCallback mutation) {
+    _undoStack.add(_captureSnapshot());
+    if (_undoStack.length > 30) _undoStack.removeAt(0);
+    _redoStack.clear();
+    setState(mutation);
+  }
+
+  void _applySnapshot(EditorStateSnapshot s) {
+    setState(() {
+      _startTrim = s.startTrim;
+      _endTrim = s.endTrim;
+      _speed = s.speed;
+      _brightness = s.brightness;
+      _contrast = s.contrast;
+      _saturation = s.saturation;
+      _videoCanvasZoom = s.videoZoom;
+      _isMirrored = s.isMirrored;
+      _isReversed = s.isReversed;
+      _isMuted = s.isMuted;
+      _chromaKey = s.chromaKey;
+      _noiseReduction = s.noiseReduction;
+      _fadeTransition = s.fadeTransition;
+      _cinemaMask = s.cinemaMask;
+      _rotTurns = s.rotTurns;
+      _filterIdx = s.filterIdx;
+      _overlayText = s.overlayText;
+      _bilingualText = s.bilingualText;
+      _voiceFx = s.voiceFx;
+      _aspectRatio = s.aspectRatio;
+      _splits = List.from(s.splits);
+      _keyframes = List.from(s.keyframes);
+      _beats = List.from(s.beats);
+    });
+    _controller?.setPlaybackSpeed(_speed);
+    _controller?.setVolume(_isMuted ? 0.0 : 1.0);
+  }
+
+  void _undo() {
+    if (_undoStack.isEmpty) return;
+    _redoStack.add(_captureSnapshot());
+    final prev = _undoStack.removeLast();
+    _applySnapshot(prev);
+    _toast('↩️ Undo Applied');
+  }
+
+  void _redo() {
+    if (_redoStack.isEmpty) return;
+    _undoStack.add(_captureSnapshot());
+    final next = _redoStack.removeLast();
+    _applySnapshot(next);
+    _toast('↪️ Redo Applied');
+  }
+
+  // ==========================================
+  // ONLINE CLOUD TRANSLATION & AI CAPTIONS
+  // ==========================================
+  Future<void> _translateCaptionOnline(String targetLangCode) async {
+    final source = _overlayText.trim().isEmpty ? 'Welcome to our new video!' : _overlayText.trim();
+    setState(() => _isCloudBusy = true);
+    try {
+      final url = Uri.parse('https://api.mymemory.translated.net/get?q=${Uri.encodeComponent(source)}&langpair=en|$targetLangCode');
+      final res = await http.get(url);
+      final data = jsonDecode(res.body);
+      final translated = data['responseData']?['translatedText'] ?? '';
+      if (translated.isNotEmpty) {
+        _recordChange(() {
+          _overlayText = source;
+          _bilingualText = translated;
+        });
+        _toast('☁️ Online Cloud Translation Added!');
+      }
+    } catch (e) {
+      _toast('Cloud Error: Check Internet Connection');
+    } finally {
+      if (mounted) setState(() => _isCloudBusy = false);
+    }
+  }
+
+  // ==========================================
+  // REAL FFMPEG HARDWARE RENDERING ENGINE
+  // ==========================================
+  Future<void> _executeRealFFmpegExport() async {
+    if (_controller == null) return;
+    setState(() => _isExporting = true);
+    _controller!.pause();
+
+    try {
+      final dir = await getTemporaryDirectory();
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final startSec = (_startTrim / 1000.0).toStringAsFixed(2);
+      final durDouble = ((_endTrim - _startTrim) / 1000.0).clamp(0.5, 7200.0);
+      final durSec = durDouble.toStringAsFixed(2);
+
+      // 1. Real MP3 Audio Extraction
+      if (_exportFormat == 'MP3') {
+        final outMp3 = '${dir.path}/ArgonCut_Audio_$ts.mp3';
+        final cmd = '-y -ss $startSec -t $durSec -i "${_videoFile.path}" -vn -acodec libmp3lame -q:a 2 "$outMp3"';
+        final session = await FFmpegKit.execute(cmd);
+        if (ReturnCode.isSuccess(await session.getReturnCode())) {
+          await Share.shareXFiles([XFile(outMp3)], text: 'Extracted MP3 Audio');
+        } else {
+          throw Exception('MP3 FFmpeg encode failed');
+        }
+        setState(() => _isExporting = false);
+        return;
+      }
+
+      // 2. Build Real FFmpeg Video Filter Graph (-vf)
+      List<String> vf = [];
+      vf.add('eq=brightness=$_brightness:contrast=$_contrast:saturation=$_saturation');
+
+      if (_isMirrored) vf.add('hflip');
+      if (_isReversed) vf.add('reverse');
+      if (_rotTurns == 1) vf.add('transpose=1');
+      if (_rotTurns == 2) vf.add('transpose=2,transpose=2');
+      if (_rotTurns == 3) vf.add('transpose=2');
+      if (_chromaKey) vf.add('chromakey=0x00FF00:0.15:0.1');
+
+      if (_cinemaMask) {
+        vf.add('drawbox=x=0:y=0:w=iw:h=ih*0.12:color=black:t=fill,drawbox=x=0:y=ih*0.88:w=iw:h=ih*0.12:color=black:t=fill');
+      }
+
+      if (_fadeTransition) {
+        final outStart = (durDouble - 0.8).clamp(0.0, durDouble).toStringAsFixed(2);
+        vf.add('fade=t=in:st=0:d=0.8,fade=t=out:st=$outStart:d=0.8');
+      }
+
+      if (_speed != 1.0) {
+        final pts = (1.0 / _speed).toStringAsFixed(2);
+        vf.add('setpts=$pts*PTS');
+      }
+
+      if (_exportFormat != 'GIF') {
+        if (_exportRes == '720p') vf.add('scale=-2:720');
+        if (_exportRes == '1080p') vf.add('scale=-2:1080');
+        if (_exportRes == '4K') vf.add('scale=-2:2160');
+      }
+
+      // 3. Build Real FFmpeg Audio Filter Graph (-af)
+      List<String> af = [];
+      if (_isReversed) af.add('areverse');
+      if (_noiseReduction) af.add('highpass=f=200,lowpass=f=3000');
+      if (_speed != 1.0) af.add('atempo=$_speed');
+      if (_voiceFx == 'Chipmunk') af.add('asetrate=44100*1.35,aresample=44100');
+      if (_voiceFx == 'Deep Monster') af.add('asetrate=44100*0.72,aresample=44100');
+      if (_voiceFx == 'Echo') af.add('aecho=0.8:0.88:60:0.4');
+
+      final ext = _exportFormat.toLowerCase();
+      final outPath = '${dir.path}/ArgonCut_Pro_$ts.$ext';
+
+      final vfStr = vf.isNotEmpty ? '-vf "${vf.join(',')}"' : '';
+      final afStr = _isMuted ? '-an' : (af.isNotEmpty ? '-af "${af.join(',')}" -c:a aac' : '-c:a aac');
+
+      String cmd;
+      if (_exportFormat == 'GIF') {
+        cmd = '-y -ss $startSec -t $durSec -i "${_videoFile.path}" -vf "${vf.join(',')},fps=15,scale=480:-1" "$outPath"';
+      } else {
+        cmd = '-y -ss $startSec -t $durSec -i "${_videoFile.path}" $vfStr $afStr -r $_exportFps -c:v libx264 -preset ultrafast "$outPath"';
+      }
+
+      final session = await FFmpegKit.execute(cmd);
+      if (ReturnCode.isSuccess(await session.getReturnCode())) {
+        await Gal.putVideo(outPath);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ Real Rendered $_exportFormat ($_exportRes) Saved to Gallery!'),
+              backgroundColor: Colors.teal,
+              action: SnackBarAction(
+                label: 'Share',
+                textColor: Colors.white,
+                onPressed: () => Share.shareXFiles([XFile(outPath)]),
+              ),
+            ),
+          );
+        }
+      } else {
+        throw Exception('FFmpeg processing failed');
+      }
+    } catch (e) {
+      _toast('Export Error: $e');
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
+  }
+
   List<double> _colorMatrix() {
-    final double b = (_brightness + _aiRelight * 0.15) * 255.0;
-    final double c = _contrast + (_sharpen * 0.25);
+    final double b = _brightness * 255.0;
+    final double c = _contrast;
     final double s = _saturation;
     final double inv = 1.0 - s;
     final double R = 0.2126 * inv, G = 0.7152 * inv, B = 0.0722 * inv;
@@ -347,177 +683,77 @@ class _UltraEditorScreenState extends State<UltraEditorScreen> {
     ];
   }
 
-  double _targetRatio() {
+  double _resolveRatio() {
     if (_controller == null) return 9 / 16;
-    if (_aiReframe || _canvasRatio == '9:16') return 9 / 16;
-    if (_canvasRatio == '16:9') return 16 / 9;
-    if (_canvasRatio == '1:1') return 1.0;
-    if (_canvasRatio == '4:5') return 4 / 5;
+    if (_aspectRatio == '9:16') return 9 / 16;
+    if (_aspectRatio == '16:9') return 16 / 9;
+    if (_aspectRatio == '1:1') return 1.0;
     return _controller!.value.aspectRatio;
-  }
-
-  void _toast(String m) {
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), duration: const Duration(seconds: 2)));
-  }
-
-  void _openTranscriptSheet() {
-    List<String> words = ['Assalam-o-Alaikum', '[umm]', 'Welcome', 'to', '[uhh]', 'ArgonCut', 'Ultra', '4K', 'Studio!'];
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF12151E),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setM) => Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('📝 Transcript Edit & Filler Removal', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00F2FE))),
-                  TextButton(
-                    onPressed: () {
-                      setM(() => words.removeWhere((w) => w.startsWith('[')));
-                      _toast('🧹 Removed filler words [umm, uhh]!');
-                    },
-                    child: const Text('Remove Fillers', style: TextStyle(color: Colors.amberAccent)),
-                  ),
-                ],
-              ),
-              Wrap(
-                spacing: 6,
-                children: words.map((w) => InputChip(
-                      label: Text(w),
-                      onDeleted: () {
-                        setM(() => words.remove(w));
-                        setState(() => _splits.add(0.5));
-                      },
-                    )).toList(),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00F2FE), foregroundColor: Colors.black),
-                  onPressed: () {
-                    setState(() => _overlayText = words.join(' '));
-                    Navigator.pop(ctx);
-                  },
-                  child: const Text('Apply Transcript Captions & Cuts'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _openExportSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF12151E),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setM) => Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('🚀 4K / 60fps / Audio / GIF Export', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF00F2FE))),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 6,
-                children: ['MP4', 'MOV', 'MKV', 'MP3', 'WAV', 'GIF'].map((f) => ChoiceChip(
-                      label: Text(f),
-                      selected: _exportFmt == f,
-                      selectedColor: const Color(0xFF00F2FE),
-                      labelStyle: TextStyle(color: _exportFmt == f ? Colors.black : Colors.white),
-                      onSelected: (_) {
-                        setM(() => _exportFmt = f);
-                        setState(() {});
-                      },
-                    )).toList(),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                children: ['720p', '1080p HD', '2K QHD', '4K Ultra'].map((r) => ChoiceChip(
-                      label: Text(r),
-                      selected: _exportRes == r,
-                      selectedColor: const Color(0xFF00F2FE),
-                      labelStyle: TextStyle(color: _exportRes == r ? Colors.black : Colors.white),
-                      onSelected: (_) {
-                        setM(() => _exportRes = r);
-                        setState(() {});
-                      },
-                    )).toList(),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  ...[30, 60].map((fps) => Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          label: Text('$fps FPS'),
-                          selected: _exportFps == fps,
-                          onSelected: (_) => setM(() => _exportFps = fps),
-                        ),
-                      )),
-                  FilterChip(
-                    label: const Text('Smart HDR'),
-                    selected: _exportHdr,
-                    onSelected: (v) => setM(() => _exportHdr = v),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00F2FE), foregroundColor: Colors.black),
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _runExport();
-                  },
-                  icon: const Icon(Icons.download_rounded),
-                  label: Text('Export $_exportFmt ($_exportRes)', style: const TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _runExport() async {
-    if (_videoFile == null) return;
-    setState(() => _isExporting = true);
-    _controller?.pause();
-    try {
-      final dir = await getTemporaryDirectory();
-      final ext = _exportFmt.toLowerCase();
-      final outPath = '${dir.path}/ArgonCut_${DateTime.now().millisecondsSinceEpoch}.$ext';
-      await _videoFile!.copy(outPath);
-      if (ext == 'mp3' || ext == 'wav') {
-        await Share.shareXFiles([XFile(outPath)], text: 'Exported Audio ($ext)');
-      } else {
-        await Gal.putVideo(outPath);
-        _toast('✅ Saved $_exportFmt ($_exportRes @ $_exportFps FPS) to Gallery!');
-      }
-    } catch (e) {
-      _toast('Export Error: $e');
-    } finally {
-      if (mounted) setState(() => _isExporting = false);
-    }
   }
 
   String _fmt(double ms) {
     final d = Duration(milliseconds: ms.toInt());
     return '${d.inMinutes.remainder(60).toString().padLeft(2, '0')}:${d.inSeconds.remainder(60).toString().padLeft(2, '0')}';
+  }
+
+  void _toast(String m) {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), duration: const Duration(milliseconds: 1400)));
+  }
+
+  void _showExportSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF141720),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setM) => Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Real Hardware FFmpeg Export', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF00E5FF))),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                children: ['MP4', 'MOV', 'MP3', 'GIF'].map((f) => ChoiceChip(
+                      label: Text(f),
+                      selected: _exportFormat == f,
+                      selectedColor: const Color(0xFF00E5FF),
+                      labelStyle: TextStyle(color: _exportFormat == f ? Colors.black : Colors.white, fontWeight: FontWeight.bold),
+                      onSelected: (_) => setM(() => _exportFormat = f),
+                    )).toList(),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                children: ['720p', '1080p', '4K'].map((r) => ChoiceChip(
+                      label: Text(r),
+                      selected: _exportRes == r,
+                      selectedColor: const Color(0xFF00E5FF),
+                      labelStyle: TextStyle(color: _exportRes == r ? Colors.black : Colors.white, fontWeight: FontWeight.bold),
+                      onSelected: (_) => setM(() => _exportRes = r),
+                    )).toList(),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E5FF), foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 14)),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _executeRealFFmpegExport();
+                  },
+                  icon: const Icon(Icons.bolt),
+                  label: Text('Render & Save $_exportFormat', style: const TextStyle(fontWeight: FontWeight.w900)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -533,204 +769,360 @@ class _UltraEditorScreenState extends State<UltraEditorScreen> {
     final curMs = ready ? _controller!.value.position.inMilliseconds.toDouble().clamp(0.0, totalMs) : 0.0;
 
     return Scaffold(
+      // ==========================================
+      // 1. CAPCUT TOP BAR (RES, UNDO, REDO, EXPORT)
+      // ==========================================
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0E1118),
-        title: Text(widget.draft.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+        backgroundColor: const Color(0xFF0A0B0E),
+        elevation: 0,
+        leading: IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+        titleSpacing: 0,
+        title: Row(
+          children: [
+            GestureDetector(
+              onTap: _showExportSheet,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(color: const Color(0xFF1A1D26), borderRadius: BorderRadius.circular(6)),
+                child: Row(
+                  children: [
+                    Text('$_exportRes • ${_exportFps}fps', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    const Icon(Icons.arrow_drop_down, size: 16),
+                  ],
+                ),
+              ),
+            ),
+            const Spacer(),
+            // UNDO BUTTON
+            IconButton(
+              icon: Icon(Icons.undo_rounded, color: _undoStack.isNotEmpty ? Colors.white : Colors.white24),
+              tooltip: 'Undo',
+              onPressed: _undoStack.isNotEmpty ? _undo : null,
+            ),
+            // REDO BUTTON
+            IconButton(
+              icon: Icon(Icons.redo_rounded, color: _redoStack.isNotEmpty ? Colors.white : Colors.white24),
+              tooltip: 'Redo',
+              onPressed: _redoStack.isNotEmpty ? _redo : null,
+            ),
+          ],
+        ),
         actions: [
-          IconButton(icon: const Icon(Icons.edit_note, color: Color(0xFF00F2FE)), onPressed: _openTranscriptSheet),
-          IconButton(
-            icon: const Icon(Icons.diamond_outlined, color: Colors.amberAccent),
-            onPressed: () {
-              setState(() => _keyframes.add((curMs / totalMs).clamp(0.05, 0.95)));
-              _toast('♦ Keyframe added at ${_fmt(curMs)}');
-            },
-          ),
           Padding(
-            padding: const EdgeInsets.all(8.0),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             child: ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00F2FE), foregroundColor: Colors.black),
-              onPressed: _isExporting ? null : _openExportSheet,
-              child: Text(_isExporting ? '...' : '4K Export', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00E5FF),
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              ),
+              onPressed: _isExporting ? null : _showExportSheet,
+              child: Text(_isExporting ? 'Rendering...' : 'Export', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
             ),
           ),
         ],
       ),
       body: !ready
-          ? Center(
-              child: ElevatedButton(
-                onPressed: () async {
-                  final XFile? p = await _picker.pickVideo(source: ImageSource.gallery);
-                  if (p != null) _initVideo(File(p.path));
-                },
-                child: const Text('Select Video Clip'),
-              ),
-            )
+          ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
+                // ==========================================
+                // 2. HAND PINCH-TO-ZOOM VIDEO PREVIEW STAGE
+                // ==========================================
                 Expanded(
-                  child: Container(
-                    color: Colors.black,
-                    width: double.infinity,
-                    child: LayoutBuilder(
-                      builder: (ctx, box) => Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          if (_aiCutout || _chromaKey)
-                            Container(decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF00F2FE), Color(0xFF7C4DFF)]))),
-                          AspectRatio(
-                            aspectRatio: _targetRatio(),
-                            child: Transform.scale(
-                              scale: _cropZoom * (_ai3DZoom ? 1.12 : 1.0) * (1.0 - _bodySlim * 0.08),
-                              child: Transform(
-                                alignment: Alignment.center,
-                                transform: Matrix4.identity()..scale(_isMirrored ? -1.0 : 1.0, 1.0, 1.0),
-                                child: RotatedBox(
-                                  quarterTurns: _rotTurns,
-                                  child: _maskedWidget(
-                                    ColorFiltered(colorFilter: ColorFilter.matrix(_colorMatrix()), child: VideoPlayer(_controller!)),
+                  child: GestureDetector(
+                    onScaleStart: (d) {
+                      _baseVideoCanvasZoom = _videoCanvasZoom;
+                    },
+                    onScaleUpdate: (d) {
+                      setState(() {
+                        _videoCanvasZoom = (_baseVideoCanvasZoom * d.scale).clamp(0.5, 4.0);
+                        _videoPanOffset += d.focalPointDelta;
+                      });
+                    },
+                    onDoubleTap: () {
+                      _recordChange(() {
+                        _videoCanvasZoom = 1.0;
+                        _videoPanOffset = Offset.zero;
+                      });
+                      _toast('🔄 Reset Canvas Zoom');
+                    },
+                    child: Container(
+                      color: Colors.black,
+                      width: double.infinity,
+                      child: LayoutBuilder(
+                        builder: (ctx, box) => Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            AspectRatio(
+                              aspectRatio: _resolveRatio(),
+                              child: ClipRect(
+                                child: Transform.translate(
+                                  offset: _videoPanOffset,
+                                  child: Transform.scale(
+                                    scale: _videoCanvasZoom,
+                                    child: Transform(
+                                      alignment: Alignment.center,
+                                      transform: Matrix4.identity()..scale(_isMirrored ? -1.0 : 1.0, 1.0, 1.0),
+                                      child: RotatedBox(
+                                        quarterTurns: _rotTurns,
+                                        child: ColorFiltered(
+                                          colorFilter: ColorFilter.matrix(_colorMatrix()),
+                                          child: VideoPlayer(_controller!),
+                                        ),
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                          if (_pipLayers.isNotEmpty)
+
+                            if (_cinemaMask) ...[
+                              Positioned(top: 0, left: 0, right: 0, height: 28, child: Container(color: Colors.black)),
+                              Positioned(bottom: 0, left: 0, right: 0, height: 28, child: Container(color: Colors.black)),
+                            ],
+
+                            // Pinch-Zoomable & Draggable Text Overlay
+                            if (_overlayText.isNotEmpty)
+                              Positioned(
+                                left: (_textPos.dx * box.maxWidth - 90).clamp(10.0, box.maxWidth - 160),
+                                top: (_textPos.dy * box.maxHeight - 25).clamp(10.0, box.maxHeight - 65),
+                                child: GestureDetector(
+                                  onScaleStart: (_) => _baseTextScale = _textScale,
+                                  onScaleUpdate: (d) {
+                                    setState(() {
+                                      _textScale = (_baseTextScale * d.scale).clamp(0.6, 3.0);
+                                      _textPos = Offset(
+                                        (_textPos.dx + d.focalPointDelta.dx / box.maxWidth).clamp(0.05, 0.92),
+                                        (_textPos.dy + d.focalPointDelta.dy / box.maxHeight).clamp(0.05, 0.92),
+                                      );
+                                    });
+                                  },
+                                  child: Transform.scale(
+                                    scale: _textScale,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black87,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: const Color(0xFF00E5FF), width: 1),
+                                      ),
+                                      child: Column(
+                                        children: [
+                                          Text(_overlayText, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                                          if (_bilingualText.isNotEmpty)
+                                            Text(_bilingualText, style: const TextStyle(color: Colors.amberAccent, fontSize: 14, fontWeight: FontWeight.bold)),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+
+                            // Zoom indicator pill
                             Positioned(
-                              right: 12,
-                              top: 12,
+                              bottom: 8,
+                              right: 10,
                               child: Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(color: Colors.black87, border: Border.all(color: const Color(0xFF00F2FE)), borderRadius: BorderRadius.circular(8)),
-                                child: Text('PIP (${_pipLayers.length}) • $_blendMode', style: const TextStyle(fontSize: 10)),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+                                child: Text('🤏 Canvas: ${_videoCanvasZoom.toStringAsFixed(1)}x', style: const TextStyle(fontSize: 10, color: Colors.white70)),
                               ),
                             ),
-                          if (_stickers.isNotEmpty)
-                            Positioned(
-                              left: (_stickerPos.dx * box.maxWidth).clamp(10.0, box.maxWidth - 60),
-                              top: (_stickerPos.dy * box.maxHeight).clamp(10.0, box.maxHeight - 60),
-                              child: GestureDetector(
-                                onPanUpdate: (d) => setState(() => _stickerPos = Offset((_stickerPos.dx + d.delta.dx / box.maxWidth).clamp(0.05, 0.9), (_stickerPos.dy + d.delta.dy / box.maxHeight).clamp(0.05, 0.9))),
-                                child: Text(_stickers.join(' '), style: const TextStyle(fontSize: 34)),
-                              ),
-                            ),
-                          if (_overlayText.isNotEmpty)
-                            Positioned(
-                              left: (_textPos.dx * box.maxWidth - 80).clamp(10.0, box.maxWidth - 160),
-                              top: (_textPos.dy * box.maxHeight - 25).clamp(10.0, box.maxHeight - 60),
-                              child: GestureDetector(
-                                onPanUpdate: (d) => setState(() => _textPos = Offset((_textPos.dx + d.delta.dx / box.maxWidth).clamp(0.05, 0.9), (_textPos.dy + d.delta.dy / box.maxHeight).clamp(0.05, 0.9))),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(8)),
-                                  child: Column(
-                                    children: [
-                                      Text(_overlayText, style: const TextStyle(color: Color(0xFF00F2FE), fontSize: 18, fontWeight: FontWeight.bold)),
-                                      if (_bilingualSub.isNotEmpty) Text(_bilingualSub, style: const TextStyle(color: Colors.amberAccent, fontSize: 13)),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          Positioned(
-                            top: 6,
-                            left: 6,
-                            child: Wrap(
-                              spacing: 4,
-                              children: [
-                                if (_aiCutout) _badge('✂️ Auto Cutout'),
-                                if (_aiTracking) _badge('🎯 Tracking'),
-                                if (_aiUpscale) _badge('💎 4K Upscaled'),
-                                if (_smoothOpticalFlow) _badge('🌊 Optical Flow'),
-                                if (_speedCurve != 'None') _badge('📈 $_speedCurve'),
-                                if (_vfx != 'None') _badge('⚡ $_vfx'),
-                                if (_bodyFx != 'None') _badge('🕺 $_bodyFx'),
-                                if (_aiAvatar != 'None') _badge('🧑🎤 $_aiAvatar'),
-                                if (_aiLang != 'Original') _badge('🌐 $_aiLang'),
-                              ],
-                            ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
+
+                // ==========================================
+                // 3. PLAYBACK CONTROLS & TIME READOUT
+                // ==========================================
                 Container(
-                  color: const Color(0xFF10131C),
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  color: const Color(0xFF0F1117),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   child: Row(
                     children: [
                       IconButton(
-                        icon: Icon(_controller!.value.isPlaying ? Icons.pause_circle : Icons.play_circle, color: const Color(0xFF00F2FE), size: 30),
-                        onPressed: () => setState(() {
-                          _isFrozen = false;
-                          _controller!.value.isPlaying ? _controller!.pause() : _controller!.play();
-                        }),
+                        icon: Icon(_controller!.value.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, color: Colors.white, size: 28),
+                        onPressed: () => setState(() => _controller!.value.isPlaying ? _controller!.pause() : _controller!.play()),
                       ),
-                      Text('${_fmt(curMs)} / ${_fmt(totalMs)}', style: const TextStyle(fontSize: 11)),
-                      Expanded(child: Slider(value: curMs, min: 0.0, max: totalMs, onChanged: (v) => _controller!.seekTo(Duration(milliseconds: v.toInt())))),
+                      Text('${_fmt(curMs)} / ${_fmt(totalMs)}', style: const TextStyle(fontSize: 12, color: Colors.white70, fontWeight: FontWeight.w600)),
+                      const Spacer(),
+                      Text('Timeline Zoom: ${_timelineZoom.toStringAsFixed(1)}x', style: const TextStyle(fontSize: 11, color: Color(0xFF00E5FF))),
+                      const SizedBox(width: 8),
                       IconButton(
-                        icon: const Icon(Icons.content_cut, color: Colors.amberAccent, size: 20),
+                        icon: const Icon(Icons.diamond_outlined, size: 20, color: Colors.amberAccent),
+                        tooltip: 'Add Keyframe',
                         onPressed: () {
-                          setState(() => _splits.add((curMs / totalMs).clamp(0.1, 0.9)));
-                          _toast('✂️ Clip Split Added');
+                          _recordChange(() => _keyframes.add((curMs / totalMs).clamp(0.02, 0.98)));
+                          _toast('♦ Keyframe Added');
                         },
                       ),
                     ],
                   ),
                 ),
-                Container(
-                  height: 64,
-                  color: const Color(0xFF0B0E15),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Container(
-                        height: 18,
-                        width: double.infinity,
-                        color: const Color(0xFF1E293B),
-                        child: Stack(
-                          children: [
-                            const Padding(padding: EdgeInsets.only(left: 6), child: Text('🎬 Video + Keyframes + Splits', style: TextStyle(fontSize: 9))),
-                            ..._splits.map((s) => Positioned(left: s * 280, top: 0, bottom: 0, child: Container(width: 2, color: Colors.white))),
-                            ..._keyframes.map((k) => Positioned(left: k * 280, child: const Icon(Icons.diamond, size: 11, color: Colors.amberAccent))),
-                          ],
+
+                // ==========================================
+                // 4. CAPCUT HAND PINCH-TO-ZOOM TIMELINE
+                // ==========================================
+                GestureDetector(
+                  onScaleStart: (_) {
+                    _baseTimelineZoom = _timelineZoom;
+                  },
+                  onScaleUpdate: (details) {
+                    setState(() {
+                      // Two-finger hand pinch zoom on timeline (0.8x to 5.0x)
+                      _timelineZoom = (_baseTimelineZoom * details.scale).clamp(0.8, 5.0);
+                    });
+                  },
+                  child: Container(
+                    height: 125,
+                    color: const Color(0xFF0A0B0E),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: EdgeInsets.symmetric(horizontal: MediaQuery.of(context).size.width * 0.5),
+                          child: GestureDetector(
+                            onTapDown: (d) {
+                              final trackWidth = 320.0 * _timelineZoom;
+                              final ratio = (d.localPosition.dx / trackWidth).clamp(0.0, 1.0);
+                              _controller!.seekTo(Duration(milliseconds: (ratio * totalMs).toInt()));
+                            },
+                            child: SizedBox(
+                              width: 320.0 * _timelineZoom,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Time Ruler
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: List.generate(
+                                      (5 * _timelineZoom).round().clamp(4, 20),
+                                      (i) => Text(
+                                        _fmt((totalMs / ((5 * _timelineZoom).round().clamp(4, 20))) * i),
+                                        style: const TextStyle(fontSize: 9, color: Colors.white38),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+
+                                  // Main Video Filmstrip Track
+                                  Container(
+                                    height: 44,
+                                    width: 320.0 * _timelineZoom,
+                                    decoration: BoxDecoration(
+                                      gradient: const LinearGradient(colors: [Color(0xFF1E293B), Color(0xFF334155), Color(0xFF1E293B)]),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.white54, width: 1.5),
+                                    ),
+                                    child: Stack(
+                                      alignment: Alignment.centerLeft,
+                                      children: [
+                                        Padding(
+                                          padding: const EdgeInsets.only(left: 10),
+                                          child: Text(
+                                            '🎬 Clip (${_speed}x)  •  Pinch with 2 fingers to Zoom Timeline',
+                                            style: const TextStyle(fontSize: 10, color: Colors.white70, fontWeight: FontWeight.w600),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        // Split Cut Lines
+                                        ..._splits.map((s) => Positioned(
+                                              left: s * 320.0 * _timelineZoom,
+                                              top: 0,
+                                              bottom: 0,
+                                              child: Container(width: 3, color: Colors.black),
+                                            )),
+                                        // Keyframe Diamonds
+                                        ..._keyframes.map((k) => Positioned(
+                                              left: k * 320.0 * _timelineZoom,
+                                              child: const Icon(Icons.diamond, size: 14, color: Colors.amberAccent),
+                                            )),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 5),
+
+                                  // Audio & Beats Track
+                                  Container(
+                                    height: 24,
+                                    width: 320.0 * _timelineZoom,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF0F292A),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Stack(
+                                      alignment: Alignment.centerLeft,
+                                      children: [
+                                        Padding(
+                                          padding: const EdgeInsets.only(left: 8),
+                                          child: Text(
+                                            _isMuted ? '🔇 Audio Muted' : '🎵 Original Sound ($_voiceFx)',
+                                            style: const TextStyle(fontSize: 9, color: Color(0xFF00E5FF)),
+                                          ),
+                                        ),
+                                        ..._beats.map((b) => Positioned(
+                                              left: b * 320.0 * _timelineZoom,
+                                              child: Container(width: 6, height: 6, decoration: const BoxDecoration(color: Colors.yellowAccent, shape: BoxShape.circle)),
+                                            )),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                      Container(
-                        height: 16,
-                        width: double.infinity,
-                        color: const Color(0xFF311B47),
-                        padding: const EdgeInsets.only(left: 6),
-                        child: Text('✨ PIP (${_pipLayers.length}) • Subtitles • Stickers (${_stickers.length})', style: const TextStyle(fontSize: 9, color: Colors.purpleAccent)),
-                      ),
-                      Container(
-                        height: 16,
-                        width: double.infinity,
-                        color: const Color(0xFF0F2E2E),
-                        child: Stack(
-                          children: [
-                            Padding(padding: const EdgeInsets.only(left: 6), child: Text('🎵 ${_audioTracks.join(" + ")} • Voice: $_voiceChanger', style: const TextStyle(fontSize: 9, color: Colors.tealAccent))),
-                            ..._beats.map((b) => Positioned(left: b * 280, top: 5, child: Container(width: 6, height: 6, decoration: const BoxDecoration(color: Colors.yellowAccent, shape: BoxShape.circle)))),
-                          ],
+
+                        // Fixed Center White CapCut Playhead Line
+                        IgnorePointer(
+                          child: Container(
+                            width: 2,
+                            height: 115,
+                            color: Colors.white,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-                Container(height: 185, color: const Color(0xFF141824), padding: const EdgeInsets.all(10), child: _buildWorkspace(totalMs)),
+
+                // ==========================================
+                // 5. COLLAPSIBLE CONTEXTUAL SUB-PANEL
+                // ==========================================
+                if (_activeToolPanel != -1)
+                  Container(
+                    height: 135,
+                    color: const Color(0xFF141720),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    child: _buildContextualSubPanel(totalMs, curMs),
+                  ),
+
+                // ==========================================
+                // 6. CAPCUT CLEAN BOTTOM MAIN ACTION BAR
+                // ==========================================
                 Container(
-                  height: 60,
-                  color: const Color(0xFF090B10),
+                  height: 64,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF0F1117),
+                    border: Border(top: BorderSide(color: Colors.white12, width: 0.5)),
+                  ),
                   child: ListView(
                     scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
                     children: [
-                      _tabBtn(0, Icons.content_cut, 'Edit & Speed'),
-                      _tabBtn(1, Icons.auto_awesome, 'AI Smart'),
-                      _tabBtn(2, Icons.graphic_eq, 'Audio & Beats'),
-                      _tabBtn(3, Icons.subtitles, 'Text & Stickers'),
-                      _tabBtn(4, Icons.blur_on, 'VFX & Mask'),
-                      _tabBtn(5, Icons.palette, 'Color & Retouch'),
-                      _tabBtn(6, Icons.aspect_ratio, 'Canvas'),
+                      _capcutBottomItem(0, Icons.content_cut_rounded, 'Edit'),
+                      _capcutBottomItem(1, Icons.Graphic_eq_rounded, 'Audio'),
+                      _capcutBottomItem(2, Icons.text_fields_rounded, 'Text & AI Sub'),
+                      _capcutBottomItem(3, Icons.auto_fix_high_rounded, 'Effects'),
+                      _capcutBottomItem(4, Icons.filter_vintage_rounded, 'Filters'),
+                      _capcutBottomItem(5, Icons.tune_rounded, 'Adjust'),
+                      _capcutBottomItem(6, Icons.aspect_ratio_rounded, 'Ratio'),
                     ],
                   ),
                 ),
@@ -739,298 +1131,1668 @@ class _UltraEditorScreenState extends State<UltraEditorScreen> {
     );
   }
 
-  Widget _badge(String t) => Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(4)), child: Text(t, style: const TextStyle(fontSize: 9, color: Color(0xFF00F2FE))));
-
-  Widget _maskedWidget(Widget child) {
-    if (_maskShape == 'Circle') return ClipOval(child: Align(widthFactor: _maskFactor, heightFactor: _maskFactor, child: child));
-    if (_maskShape == 'Rectangle') return ClipRRect(borderRadius: BorderRadius.circular(24), child: Align(widthFactor: _maskFactor, heightFactor: _maskFactor, child: child));
-    if (_maskShape == 'Split') return ClipRect(child: Align(alignment: Alignment.topCenter, heightFactor: _maskFactor, child: child));
-    return child;
-  }
-
-  Widget _tabBtn(int i, IconData ic, String l) {
-    final s = _activeTab == i;
+  Widget _capcutBottomItem(int index, IconData icon, String label) {
+    final active = _activeToolPanel == index;
     return GestureDetector(
-      onTap: () => setState(() => _activeTab = i),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+      onTap: () => setState(() => _activeToolPanel = active ? -1 : index),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 15),
+        alignment: Alignment.center,
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(ic, color: s ? const Color(0xFF00F2FE) : Colors.white54, size: 20),
-            const SizedBox(height: 3),
-            Text(l, style: TextStyle(fontSize: 10, color: s ? const Color(0xFF00F2FE) : Colors.white54, fontWeight: s ? FontWeight.bold : FontWeight.normal)),
+            Icon(icon, color: active ? const Color(0xFF00E5FF) : Colors.white70, size: 22),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: active ? FontWeight.bold : FontWeight.normal,
+                color: active ? const Color(0xFF00E5FF) : Colors.white70,
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildWorkspace(double totalMs) {
-    switch (_activeTab) {
-      case 0:
+  Widget _buildContextualSubPanel(double totalMs, double curMs) {
+    switch (_activeToolPanel) {
+      case 0: // EDIT (Split, Speed, Reverse, Mirror, Rotate, Trim)
         return ListView(
           children: [
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  _btn(Icons.ac_unit, _isFrozen ? 'Unfreeze' : 'Freeze', () => setState(() => _isFrozen = !_isFrozen)),
-                  _btn(Icons.fast_rewind, 'Reverse', () => setState(() => _isReversed = !_isReversed)),
-                  _btn(Icons.flip, 'Mirror', () => setState(() => _isMirrored = !_isMirrored)),
-                  _btn(Icons.rotate_90_degrees_ccw, 'Rotate', () => setState(() => _rotTurns = (_rotTurns + 1) % 4)),
-                  _btn(Icons.layers, '+ PIP Layer', () => setState(() => _pipLayers.add('PIP'))),
+                  _subBtn(Icons.content_cut, 'Split', () {
+                    _recordChange(() => _splits.add((curMs / totalMs).clamp(0.05, 0.95)));
+                    _toast('✂️ Split Added');
+                  }),
+                  _subBtn(Icons.flip, 'Mirror', () => _recordChange(() => _isMirrored = !_isMirrored)),
+                  _subBtn(Icons.rotate_90_degrees_ccw, 'Rotate', () => _recordChange(() => _rotTurns = (_rotTurns + 1) % 4)),
+                  _subBtn(Icons.fast_rewind, _isReversed ? 'Normal Dir' : 'Reverse', () => _recordChange(() => _isReversed = !_isReversed)),
+                  ...[0.5, 1.0, 1.5, 2.0].map((s) => Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: ChoiceChip(
+                          label: Text('${s}x', style: const TextStyle(fontSize: 11)),
+                          selected: _speed == s,
+                          selectedColor: const Color(0xFF00E5FF),
+                          labelStyle: TextStyle(color: _speed == s ? Colors.black : Colors.white),
+                          onSelected: (_) {
+                            _recordChange(() => _speed = s);
+                            _controller!.setPlaybackSpeed(s);
+                          },
+                        ),
+                      )),
                 ],
               ),
             ),
             SizedBox(
-              height: 28,
+              height: 36,
               child: RangeSlider(
                 values: RangeValues(_startTrim.clamp(0.0, totalMs), _endTrim.clamp(0.0, totalMs)),
                 min: 0.0,
                 max: totalMs,
+                onChangeStart: (_) => _undoStack.add(_captureSnapshot()),
                 onChanged: (v) => setState(() {
                   _startTrim = v.start;
                   _endTrim = v.end;
                 }),
               ),
             ),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  ...[0.5, 1.0, 1.5, 2.0].map((s) => Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: ChoiceChip(
-                          label: Text('${s}x', style: const TextStyle(fontSize: 10)),
-                          selected: _playbackSpeed == s && _speedCurve == 'None',
-                          onSelected: (_) {
-                            setState(() {
-                              _playbackSpeed = s;
-                              _speedCurve = 'None';
-                            });
-                            _controller!.setPlaybackSpeed(s);
-                          },
-                        ),
-                      )),
-                  ...['Montage', 'Hero', 'Bullet', 'Jump Cut'].map((c) => Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: ChoiceChip(
-                          label: Text('📈 $c', style: const TextStyle(fontSize: 10)),
-                          selected: _speedCurve == c,
-                          onSelected: (_) => setState(() => _speedCurve = c),
-                        ),
-                      )),
-                  FilterChip(label: const Text('Optical Flow Slow-Mo', style: TextStyle(fontSize: 10)), selected: _smoothOpticalFlow, onSelected: (v) => setState(() => _smoothOpticalFlow = v)),
-                ],
-              ),
-            ),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: ['Normal', 'Multiply', 'Screen', 'Overlay'].map((b) => Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: ChoiceChip(label: Text('Blend: $b', style: const TextStyle(fontSize: 10)), selected: _blendMode == b, onSelected: (_) => setState(() => _blendMode = b)),
-                    )).toList(),
-              ),
-            ),
           ],
         );
-      case 1:
-        return ListView(
-          children: [
-            Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              children: [
-                FilterChip(label: const Text('✂️ Auto Cutout BG', style: TextStyle(fontSize: 10)), selected: _aiCutout, onSelected: (v) => setState(() => _aiCutout = v)),
-                FilterChip(label: const Text('📱 Auto Reframe 9:16', style: TextStyle(fontSize: 10)), selected: _aiReframe, onSelected: (v) => setState(() => _aiReframe = v)),
-                FilterChip(label: const Text('🎯 Motion Tracking', style: TextStyle(fontSize: 10)), selected: _aiTracking, onSelected: (v) => setState(() => _aiTracking = v)),
-                FilterChip(label: const Text('💎 AI 4K Upscale', style: TextStyle(fontSize: 10)), selected: _aiUpscale, onSelected: (v) => setState(() => _aiUpscale = v)),
-                FilterChip(label: const Text('🌀 AI 3D Movement', style: TextStyle(fontSize: 10)), selected: _ai3DZoom, onSelected: (v) => setState(() => _ai3DZoom = v)),
-                FilterChip(label: const Text('⚡ Remove Flicker', style: TextStyle(fontSize: 10)), selected: _aiDeflicker, onSelected: (v) => setState(() => _aiDeflicker = v)),
-                ActionChip(label: Text('🧑🎤 Avatar: $_aiAvatar', style: const TextStyle(fontSize: 10)), onPressed: () => setState(() => _aiAvatar = _aiAvatar == 'None' ? 'Sara AI' : 'None')),
-                ActionChip(
-                  label: Text('🌐 Dub: $_aiLang', style: const TextStyle(fontSize: 10)),
-                  onPressed: () {
-                    final l = ['Original', 'Urdu Lip-Sync', 'English', 'Arabic'];
-                    setState(() => _aiLang = l[(l.indexOf(_aiLang) + 1) % l.length]);
-                  },
-                ),
-              ],
-            ),
-            _slider('💡 AI Relight', _aiRelight, -0.5, 0.8, (v) => setState(() => _aiRelight = v)),
-          ],
-        );
-      case 2:
+
+      case 1: // AUDIO (Mute, Voice FX, Denoise, Beats, Extract MP3)
         return ListView(
           children: [
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  _btn(Icons.audiotrack, 'Extract MP3', () {
-                    setState(() => _exportFmt = 'MP3');
-                    _runExport();
+                  _subBtn(_isMuted ? Icons.volume_off : Icons.volume_up, _isMuted ? 'Unmute' : 'Mute', () {
+                    _recordChange(() => _isMuted = !_isMuted);
+                    _controller!.setVolume(_isMuted ? 0.0 : 1.0);
                   }),
-                  _btn(Icons.mic, '+ Voiceover', () => setState(() => _audioTracks.add('Voiceover'))),
-                  _btn(Icons.auto_graph, 'Auto Beats 🟡', () => setState(() => _beats.addAll([0.15, 0.3, 0.45, 0.6, 0.75, 0.9]))),
-                  _btn(Icons.library_music, '+ SFX Library', () => setState(() => _audioTracks.add('Whoosh SFX'))),
+                  _subBtn(Icons.Noise_control_off, _noiseReduction ? 'Denoise ON' : 'Reduce Noise', () {
+                    _recordChange(() => _noiseReduction = !_noiseReduction);
+                  }),
+                  _subBtn(Icons.auto_graph, 'Auto Beats 🟡', () {
+                    _recordChange(() => _beats = [0.15, 0.3, 0.45, 0.6, 0.75, 0.9]);
+                  }),
+                  _subBtn(Icons.audiotrack, 'Export MP3', () {
+                    setState(() => _exportFormat = 'MP3');
+                    _executeRealFFmpegExport();
+                  }),
                 ],
               ),
             ),
-            Wrap(
-              spacing: 6,
-              children: [
-                FilterChip(label: const Text('Vocal Isolation', style: TextStyle(fontSize: 10)), selected: _voiceIso, onSelected: (v) => setState(() => _voiceIso = v)),
-                FilterChip(label: const Text('Noise Reduction', style: TextStyle(fontSize: 10)), selected: _noiseRed, onSelected: (v) => setState(() => _noiseRed = v)),
-                FilterChip(label: const Text('Loudness Norm', style: TextStyle(fontSize: 10)), selected: _loudNorm, onSelected: (v) => setState(() => _loudNorm = v)),
-                FilterChip(label: const Text('Enhance Voice', style: TextStyle(fontSize: 10)), selected: _enhanceVoice, onSelected: (v) => setState(() => _enhanceVoice = v)),
-                FilterChip(label: const Text('🎶 Speech to Song', style: TextStyle(fontSize: 10)), selected: _speechToSong, onSelected: (v) => setState(() => _speechToSong = v)),
-              ],
-            ),
+            const SizedBox(height: 8),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
-                children: ['Normal', 'Robot', 'Chipmunk', 'Deep Monster', 'Echo'].map((vc) => Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: ChoiceChip(label: Text(vc, style: const TextStyle(fontSize: 10)), selected: _voiceChanger == vc, onSelected: (_) => setState(() => _voiceChanger = vc)),
+                children: ['Normal', 'Chipmunk', 'Deep Monster', 'Echo'].map((vf) => Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(vf, style: const TextStyle(fontSize: 11)),
+                        selected: _voiceFx == vf,
+                        selectedColor: const Color(0xFF00E5FF),
+                        labelStyle: TextStyle(color: _voiceFx == vf ? Colors.black : Colors.white),
+                        onSelected: (_) => _recordChange(() => _voiceFx = vf),
+                      ),
                     )).toList(),
               ),
             ),
           ],
         );
-      case 3:
+
+      case 2: // TEXT & ONLINE CLOUD SUBTITLES
         return ListView(
           children: [
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _btn(Icons.closed_caption, 'Auto Captions', () => setState(() => _overlayText = 'AI Auto Captions Active')),
-                  _btn(Icons.music_note, 'Auto Lyrics', () => setState(() => _overlayText = '🎵 Synced Music Lyrics...')),
-                  _btn(Icons.translate, 'Bilingual Sub', () => setState(() => _bilingualSub = _bilingualSub.isEmpty ? 'اردو اور انگلش سب ٹائٹلز' : '')),
-                  _btn(Icons.record_voice_over, 'TTS Voice', () => _toast('🗣️ AI Text-to-Speech Added!')),
-                  _btn(Icons.emoji_emotions, '+ Sticker', () => setState(() => _stickers.add('🔥🚀'))),
-                ],
-              ),
-            ),
-            const SizedBox(height: 6),
-            SizedBox(
-              height: 36,
-              child: TextField(
-                decoration: InputDecoration(hintText: 'Type text overlay...', filled: true, fillColor: const Color(0xFF22283A), border: OutlineInputBorder(borderRadius: BorderRadius.circular(8))),
-                onChanged: (v) => setState(() => _overlayText = v),
-              ),
-            ),
-          ],
-        );
-      case 4:
-        return ListView(
-          children: [
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: ['None', 'Glitch', 'Blur', 'Retro VHS', 'Spark', 'Shake'].map((fx) => Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: ChoiceChip(label: Text('VFX: $fx', style: const TextStyle(fontSize: 10)), selected: _vfx == fx, onSelected: (_) => setState(() => _vfx = fx)),
-                    )).toList(),
-              ),
-            ),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: ['None', 'Neon Outline', 'Soul Clone', 'Lightning'].map((bf) => Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: ChoiceChip(label: Text('Body: $bf', style: const TextStyle(fontSize: 10)), selected: _bodyFx == bf, onSelected: (_) => setState(() => _bodyFx = bf)),
-                    )).toList(),
-              ),
-            ),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: ['None', 'Circle', 'Split', 'Rectangle'].map((m) => Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: ChoiceChip(label: Text('Mask: $m', style: const TextStyle(fontSize: 10)), selected: _maskShape == m, onSelected: (_) => setState(() => _maskShape = m)),
-                    )).toList(),
-              ),
-            ),
-            Wrap(
-              spacing: 6,
+            Row(
               children: [
-                FilterChip(label: const Text('🟩 Chroma Key', style: TextStyle(fontSize: 10)), selected: _chromaKey, onSelected: (v) => setState(() => _chromaKey = v)),
-                FilterChip(label: const Text('⚖️ Stabilize', style: TextStyle(fontSize: 10)), selected: _stabilize, onSelected: (v) => setState(() => _stabilize = v)),
-                FilterChip(label: const Text('✨ Denoise', style: TextStyle(fontSize: 10)), selected: _denoise, onSelected: (v) => setState(() => _denoise = v)),
+                Expanded(
+                  child: SizedBox(
+                    height: 38,
+                    child: TextField(
+                      decoration: InputDecoration(
+                        hintText: 'ویڈیو کے لیے ٹیکسٹ لکھیں...',
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                        filled: true,
+                        fillColor: const Color(0xFF1E2230),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onChanged: (v) => setState(() => _overlayText = v),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (_isCloudBusy)
+                  const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                else ...[
+                  _subBtn(Icons.cloud_download, '☁️ Urdu Sub', () => _translateCaptionOnline('ur')),
+                  _subBtn(Icons.cloud_download, '☁️ Arabic', () => _translateCaptionOnline('ar')),
+                ],
               ],
             ),
           ],
         );
-      case 5:
-        return ListView(
+
+      case 3: // EFFECTS & MASKING (Real FFmpeg Fade, Cinema Bars, Chroma Key)
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _btn(Icons.upload_file, 'Import .cube LUT', () => _toast('🎨 Custom .cube LUT Applied!')),
-                  _btn(Icons.color_lens, 'AI Color Match', () => setState(() => _contrast = 1.2)),
-                  ...List.generate(_luts.length, (i) => Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: ChoiceChip(
-                          label: Text(_luts[i]['n'], style: const TextStyle(fontSize: 10)),
-                          selected: _lutIdx == i,
-                          onSelected: (_) => setState(() {
-                            _lutIdx = i;
-                            _brightness = _luts[i]['b'];
-                            _contrast = _luts[i]['c'];
-                            _saturation = _luts[i]['s'];
-                          }),
-                        ),
-                      )),
-                ],
-              ),
+            FilterChip(
+              label: const Text('✨ Fade In/Out Transition'),
+              selected: _fadeTransition,
+              onSelected: (v) => _recordChange(() => _fadeTransition = v),
             ),
-            _slider('Brightness', _brightness, -0.4, 0.4, (v) => setState(() => _brightness = v)),
-            _slider('Contrast', _contrast, 0.5, 2.0, (v) => setState(() => _contrast = v)),
-            _slider('Saturation', _saturation, 0.0, 2.5, (v) => setState(() => _saturation = v)),
-            _slider('😊 Face Smooth', _faceSmooth, 0.0, 1.0, (v) => setState(() => _faceSmooth = v)),
-            _slider('🧍 Body Slim', _bodySlim, 0.0, 1.0, (v) => setState(() => _bodySlim = v)),
+            FilterChip(
+              label: const Text('🎬 Cinema Bars Mask'),
+              selected: _cinemaMask,
+              onSelected: (v) => _recordChange(() => _cinemaMask = v),
+            ),
+            FilterChip(
+              label: const Text('🟩 Chroma Key (Green Screen)'),
+              selected: _chromaKey,
+              onSelected: (v) => _recordChange(() => _chromaKey = v),
+            ),
           ],
         );
-      case 6:
+
+      case 4: // FILTERS / LUTS
+        return ListView.builder(
+          scrollDirection: Axis.horizontal,
+          itemCount: _filters.length,
+          itemBuilder: (ctx, i) {
+            final sel = _filterIdx == i;
+            return GestureDetector(
+              onTap: () {
+                final f = _filters[i];
+                _recordChange(() {
+                  _filterIdx = i;
+                  _brightness = f['b'];
+                  _contrast = f['c'];
+                  _saturation = f['s'];
+                });
+              },
+              child: Container(
+                width: 88,
+                margin: const EdgeInsets.only(right: 10),
+                decoration: BoxDecoration(
+                  color: sel ? const Color(0xFF00E5FF) : const Color(0xFF1E2230),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  _filters[i]['n'],
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: sel ? Colors.black : Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+              ),
+            );
+          },
+        );
+
+      case 5: // ADJUST (Brightness, Contrast, Saturation)
+        return ListView(
+          children: [
+            _adjSlider('Brightness', _brightness, -0.4, 0.4, (v) => setState(() => _brightness = v)),
+            _adjSlider('Contrast', _contrast, 0.5, 2.0, (v) => setState(() => _contrast = v)),
+            _adjSlider('Saturation', _saturation, 0.0, 2.5, (v) => setState(() => _saturation = v)),
+          ],
+        );
+
+      case 6: // RATIO / CANVAS
         return Center(
           child: Wrap(
-            spacing: 8,
-            children: ['Original', '9:16', '16:9', '1:1', '4:5'].map((r) => ChoiceChip(
+            spacing: 10,
+            children: ['Original', '9:16', '16:9', '1:1'].map((r) => ChoiceChip(
                   label: Text(r),
-                  selected: _canvasRatio == r,
-                  selectedColor: const Color(0xFF00F2FE),
-                  labelStyle: TextStyle(color: _canvasRatio == r ? Colors.black : Colors.white),
-                  onSelected: (_) => setState(() => _canvasRatio = r),
+                  selected: _aspectRatio == r,
+                  selectedColor: const Color(0xFF00E5FF),
+                  labelStyle: TextStyle(color: _aspectRatio == r ? Colors.black : Colors.white, fontWeight: FontWeight.bold),
+                  onSelected: (_) => _recordChange(() => _aspectRatio = r),
                 )).toList(),
           ),
         );
+
       default:
         return const SizedBox.shrink();
     }
   }
 
-  Widget _btn(IconData ic, String l, VoidCallback tap) => Padding(
-        padding: const EdgeInsets.only(right: 6),
-        child: OutlinedButton.icon(
-          onPressed: tap,
-          icon: Icon(ic, size: 15, color: const Color(0xFF00F2FE)),
-          label: Text(l, style: const TextStyle(fontSize: 10, color: Colors.white)),
-        ),
-      );
+  Widget _subBtn(IconData ic, String label, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white24)),
+        onPressed: onTap,
+        icon: Icon(ic, size: 16, color: const Color(0xFF00E5FF)),
+        label: Text(label, style: const TextStyle(fontSize: 11)),
+      ),
+    );
+  }
 
-  Widget _slider(String l, double v, double min, double max, ValueChanged<double> ch) => SizedBox(
-        height: 26,
-        child: Row(
+  Widget _adjSlider(String label, double val, double min, double max, ValueChanged<double> onChanged) {
+    return SizedBox(
+      height: 30,
+      child: Row(
+        children: [
+          SizedBox(width: 80, child: Text(label, style: const TextStyle(fontSize: 11))),
+          Expanded(
+            child: Slider(
+              value: val.clamp(min, max),
+              min: min,
+              max: max,
+              onChangeStart: (_) => _undoStack.add(_captureSnapshot()),
+              onChanged: onChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+import 'package:video_player/video_player.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:gal/gal.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new/return_code.dart';
+
+void main() => runApp(const ArgonCutCapCutApp());
+
+String globalGeminiApiKey = '';
+
+class ArgonCutCapCutApp extends StatelessWidget {
+  const ArgonCutCapCutApp({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'ArgonCut Pro',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF0A0B0E),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF00E5FF),
+          secondary: Color(0xFF7C4DFF),
+        ),
+      ),
+      home: const CapCutHomeScreen(),
+    );
+  }
+}
+
+// ==========================================
+// UNDO / REDO SNAPSHOT STATE MODEL
+// ==========================================
+class EditorStateSnapshot {
+  final double startTrim, endTrim, speed, brightness, contrast, saturation, videoZoom;
+  final bool isMirrored, isReversed, isMuted, chromaKey, noiseReduction, fadeTransition, cinemaMask;
+  final int rotTurns, filterIdx;
+  final String overlayText, bilingualText, voiceFx, aspectRatio;
+  final List<double> splits, keyframes, beats;
+
+  EditorStateSnapshot({
+    required this.startTrim,
+    required this.endTrim,
+    required this.speed,
+    required this.brightness,
+    required this.contrast,
+    required this.saturation,
+    required this.videoZoom,
+    required this.isMirrored,
+    required this.isReversed,
+    required this.isMuted,
+    required this.chromaKey,
+    required this.noiseReduction,
+    required this.fadeTransition,
+    required this.cinemaMask,
+    required this.rotTurns,
+    required this.filterIdx,
+    required this.overlayText,
+    required this.bilingualText,
+    required this.voiceFx,
+    required this.aspectRatio,
+    required this.splits,
+    required this.keyframes,
+    required this.beats,
+  });
+}
+
+// ==========================================
+// 1. CAPCUT STYLE HOME & CLOUD AI HUB
+// ==========================================
+class CapCutHomeScreen extends StatefulWidget {
+  const CapCutHomeScreen({super.key});
+  @override
+  State<CapCutHomeScreen> createState() => _CapCutHomeScreenState();
+}
+
+class _CapCutHomeScreenState extends State<CapCutHomeScreen> {
+  final ImagePicker _picker = ImagePicker();
+  final List<Map<String, String>> _drafts = [];
+
+  Future<void> _pickAndOpenEditor({ImageSource src = ImageSource.gallery, String? presetTitle}) async {
+    final XFile? picked = await _picker.pickVideo(source: src);
+    if (picked != null) {
+      final title = presetTitle ?? 'Project ${_drafts.length + 1}';
+      setState(() {
+        _drafts.insert(0, {'title': title, 'path': picked.path, 'time': 'Just now'});
+      });
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => CapCutProEditor(videoPath: picked.path, projectTitle: title)),
+        );
+      }
+    }
+  }
+
+  void _openCloudKeyDialog() {
+    final ctrl = TextEditingController(text: globalGeminiApiKey);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF141720),
+        title: const Row(
           children: [
-            SizedBox(width: 95, child: Text(l, style: const TextStyle(fontSize: 10))),
-            Expanded(child: Slider(value: v.clamp(min, max), min: min, max: max, onChanged: ch)),
+            Icon(Icons.cloud_done_rounded, color: Color(0xFF00E5FF)),
+            SizedBox(width: 8),
+            Text('Cloud AI Setup', style: TextStyle(fontSize: 17)),
           ],
         ),
-      );
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'آن لائن AI فیچرز (Script to Video, Auto Captions, Urdu Translation) چلانے کے لیے اپنی مفت Google Gemini API Key درج کریں:',
+              style: TextStyle(fontSize: 12, color: Colors.white70),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: ctrl,
+              decoration: InputDecoration(
+                hintText: 'AIzaSy...',
+                filled: true,
+                fillColor: const Color(0xFF1E2230),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E5FF), foregroundColor: Colors.black),
+            onPressed: () {
+              globalGeminiApiKey = ctrl.text.trim();
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('☁️ Cloud AI Connected Successfully!'), backgroundColor: Colors.teal),
+              );
+            },
+            child: const Text('Save Key', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _runCloudAIScriptGenerator() async {
+    final promptCtrl = TextEditingController();
+    String aiResult = '';
+    bool loading = false;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF141720),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setM) => Padding(
+          padding: EdgeInsets.only(left: 18, right: 18, top: 18, bottom: MediaQuery.of(ctx).viewInsets.bottom + 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.auto_awesome, color: Color(0xFF00E5FF)),
+                  SizedBox(width: 8),
+                  Text('Online AI Script & Captions Generator', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: promptCtrl,
+                decoration: InputDecoration(
+                  hintText: 'اپنی ویڈیو کا ٹاپک لکھیں (مثلاً: Top 3 Mobile Tips)...',
+                  filled: true,
+                  fillColor: const Color(0xFF1E2230),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (loading) const Center(child: CircularProgressIndicator()),
+              if (aiResult.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(8)),
+                  child: Text(aiResult, style: const TextStyle(fontSize: 12, color: Color(0xFF00E5FF))),
+                ),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E5FF), foregroundColor: Colors.black),
+                  onPressed: () async {
+                    if (promptCtrl.text.trim().isEmpty) return;
+                    setM(() => loading = true);
+                    try {
+                      if (globalGeminiApiKey.isNotEmpty) {
+                        final url = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$globalGeminiApiKey');
+                        final resp = await http.post(
+                          url,
+                          headers: {'Content-Type': 'application/json'},
+                          body: jsonEncode({
+                            'contents': [
+                              {
+                                'parts': [
+                                  {'text': 'Write a short 3-line catchy viral reel script with Urdu/English captions for: ${promptCtrl.text}'}
+                                ]
+                              }
+                            ]
+                          }),
+                        );
+                        final data = jsonDecode(resp.body);
+                        aiResult = data['candidates']?[0]?['content']?['parts']?[0]?['text'] ?? 'Cloud Script Generated!';
+                      } else {
+                        final url = Uri.parse('https://api.mymemory.translated.net/get?q=${Uri.encodeComponent(promptCtrl.text)}&langpair=en|ur');
+                        final resp = await http.get(url);
+                        final data = jsonDecode(resp.body);
+                        final trans = data['responseData']?['translatedText'] ?? promptCtrl.text;
+                        aiResult = '🎬 Hook: ${promptCtrl.text}\n💬 Urdu Caption: $trans\n🔥 Call to Action: Follow & Share!';
+                      }
+                    } catch (e) {
+                      aiResult = 'Cloud Error: Check internet connection ($e)';
+                    }
+                    setM(() => loading = false);
+                  },
+                  icon: const Icon(Icons.cloud_sync),
+                  label: const Text('Generate Live from Cloud', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0A0B0E),
+        elevation: 0,
+        title: const Row(
+          children: [
+            Icon(Icons.content_cut_rounded, color: Color(0xFF00E5FF)),
+            SizedBox(width: 8),
+            Text('ArgonCut', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 21)),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: _openCloudKeyDialog,
+            icon: const Icon(Icons.cloud_outlined, color: Color(0xFF00E5FF), size: 18),
+            label: const Text('Cloud AI Key', style: TextStyle(color: Color(0xFF00E5FF), fontSize: 12)),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // CapCut Big New Project Card
+          GestureDetector(
+            onTap: () => _pickAndOpenEditor(src: ImageSource.gallery),
+            child: Container(
+              height: 130,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [Color(0xFF00E5FF), Color(0xFF2979FF)]),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [BoxShadow(color: const Color(0xFF00E5FF).withOpacity(0.25), blurRadius: 18, offset: const Offset(0, 6))],
+              ),
+              child: const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.add_box_rounded, size: 44, color: Colors.black),
+                  SizedBox(height: 6),
+                  Text('New Project', style: TextStyle(color: Colors.black, fontSize: 20, fontWeight: FontWeight.w900)),
+                  Text('Pinch Zoom Timeline • Undo/Redo • Real FFmpeg Export', style: TextStyle(color: Colors.black87, fontSize: 11, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // CapCut Top Tools Row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _homeToolBtn(Icons.videocam_rounded, 'Camera', () => _pickAndOpenEditor(src: ImageSource.camera, presetTitle: 'Camera Shot')),
+              _homeToolBtn(Icons.auto_awesome_rounded, 'Cloud Script', _runCloudAIScriptGenerator),
+              _homeToolBtn(Icons.closed_caption_rounded, 'Auto Captions', () => _pickAndOpenEditor(presetTitle: 'Cloud Captions')),
+              _homeToolBtn(Icons.audiotrack_rounded, 'Extract MP3', () => _pickAndOpenEditor(presetTitle: 'Audio Extract')),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          const Text('Recent Drafts', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          if (_drafts.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(28),
+              decoration: BoxDecoration(color: const Color(0xFF141720), borderRadius: BorderRadius.circular(16)),
+              alignment: Alignment.center,
+              child: const Text('ابھی کوئی ڈرافٹ نہیں ہے۔ اوپر "New Project" پر کلک کر کے ویڈیو منتخب کریں!', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54, fontSize: 13)),
+            )
+          else
+            ..._drafts.map((d) => Card(
+                  color: const Color(0xFF141720),
+                  margin: const EdgeInsets.only(bottom: 10),
+                  child: ListTile(
+                    leading: const Icon(Icons.movie_creation_rounded, color: Color(0xFF00E5FF), size: 32),
+                    title: Text(d['title']!, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text(d['time']!, style: const TextStyle(fontSize: 11, color: Colors.white54)),
+                    trailing: const Icon(Icons.chevron_right, color: Color(0xFF00E5FF)),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => CapCutProEditor(videoPath: d['path']!, projectTitle: d['title']!)),
+                    ),
+                  ),
+                )),
+        ],
+      ),
+    );
+  }
+
+  Widget _homeToolBtn(IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        width: 78,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(color: const Color(0xFF141720), borderRadius: BorderRadius.circular(14)),
+        child: Column(
+          children: [
+            Icon(icon, color: const Color(0xFF00E5FF), size: 24),
+            const SizedBox(height: 6),
+            Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// =========================================================
+// 2. CAPCUT PRO EDITOR (PINCH ZOOM, UNDO/REDO, REAL FFMPEG)
+// =========================================================
+class CapCutProEditor extends StatefulWidget {
+  final String videoPath;
+  final String projectTitle;
+  const CapCutProEditor({super.key, required this.videoPath, required this.projectTitle});
+
+  @override
+  State<CapCutProEditor> createState() => _CapCutProEditorState();
+}
+
+class _CapCutProEditorState extends State<CapCutProEditor> {
+  VideoPlayerController? _controller;
+  late File _videoFile;
+
+  // Undo / Redo Stacks
+  final List<EditorStateSnapshot> _undoStack = [];
+  final List<EditorStateSnapshot> _redoStack = [];
+
+  // Hand Pinch-to-Zoom Timeline & Canvas State
+  double _timelineZoom = 1.0;
+  double _baseTimelineZoom = 1.0;
+  double _videoCanvasZoom = 1.0;
+  double _baseVideoCanvasZoom = 1.0;
+  Offset _videoPanOffset = Offset.zero;
+
+  // Real Editable Parameters
+  double _startTrim = 0.0;
+  double _endTrim = 1000.0;
+  double _speed = 1.0;
+  double _brightness = 0.0;
+  double _contrast = 1.0;
+  double _saturation = 1.0;
+  bool _isMirrored = false;
+  bool _isReversed = false;
+  bool _isMuted = false;
+  bool _chromaKey = false;
+  bool _noiseReduction = false;
+  bool _fadeTransition = false;
+  bool _cinemaMask = false;
+  int _rotTurns = 0;
+  int _filterIdx = 0;
+
+  String _overlayText = '';
+  String _bilingualText = '';
+  double _textScale = 1.0;
+  double _baseTextScale = 1.0;
+  Offset _textPos = const Offset(0.5, 0.78);
+
+  String _voiceFx = 'Normal'; // Normal, Chipmunk, Deep Monster, Echo
+  String _aspectRatio = 'Original'; // Original, 9:16, 16:9, 1:1
+  List<double> _splits = [];
+  List<double> _keyframes = [];
+  List<double> _beats = [];
+
+  // Export State
+  String _exportRes = '1080p';
+  int _exportFps = 60;
+  String _exportFormat = 'MP4'; // MP4, MOV, MP3, GIF
+  bool _isExporting = false;
+  bool _isCloudBusy = false;
+
+  // Active Bottom Sub-Panel (-1 = Collapsed like CapCut main view)
+  int _activeToolPanel = -1;
+
+  final List<Map<String, dynamic>> _filters = [
+    {'n': 'Normal', 'b': 0.0, 'c': 1.0, 's': 1.0},
+    {'n': 'Teal & Orange', 'b': -0.02, 'c': 1.3, 's': 1.45},
+    {'n': 'Cyberpunk', 'b': 0.04, 'c': 1.4, 's': 1.85},
+    {'n': 'Vintage', 'b': 0.06, 'c': 0.9, 's': 0.65},
+    {'n': 'B&W Noir', 'b': 0.0, 'c': 1.45, 's': 0.0},
+    {'n': 'Warm Glow', 'b': 0.05, 'c': 1.15, 's': 1.5},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _videoFile = File(widget.videoPath);
+    _initPlayer();
+  }
+
+  Future<void> _initPlayer() async {
+    final c = VideoPlayerController.file(_videoFile);
+    await c.initialize();
+    c.setLooping(true);
+    c.addListener(() {
+      if (!mounted || _controller == null) return;
+      final pos = _controller!.value.position.inMilliseconds.toDouble();
+      if (pos >= _endTrim) {
+        _controller!.seekTo(Duration(milliseconds: _startTrim.toInt()));
+      }
+      setState(() {});
+    });
+    setState(() {
+      _controller = c;
+      _startTrim = 0.0;
+      _endTrim = c.value.duration.inMilliseconds.toDouble().clamp(500.0, 36000000.0);
+    });
+    c.play();
+  }
+
+  // ==========================================
+  // UNDO & REDO ENGINE
+  // ==========================================
+  EditorStateSnapshot _captureSnapshot() {
+    return EditorStateSnapshot(
+      startTrim: _startTrim,
+      endTrim: _endTrim,
+      speed: _speed,
+      brightness: _brightness,
+      contrast: _contrast,
+      saturation: _saturation,
+      videoZoom: _videoCanvasZoom,
+      isMirrored: _isMirrored,
+      isReversed: _isReversed,
+      isMuted: _isMuted,
+      chromaKey: _chromaKey,
+      noiseReduction: _noiseReduction,
+      fadeTransition: _fadeTransition,
+      cinemaMask: _cinemaMask,
+      rotTurns: _rotTurns,
+      filterIdx: _filterIdx,
+      overlayText: _overlayText,
+      bilingualText: _bilingualText,
+      voiceFx: _voiceFx,
+      aspectRatio: _aspectRatio,
+      splits: List.from(_splits),
+      keyframes: List.from(_keyframes),
+      beats: List.from(_beats),
+    );
+  }
+
+  void _recordChange(VoidCallback mutation) {
+    _undoStack.add(_captureSnapshot());
+    if (_undoStack.length > 30) _undoStack.removeAt(0);
+    _redoStack.clear();
+    setState(mutation);
+  }
+
+  void _applySnapshot(EditorStateSnapshot s) {
+    setState(() {
+      _startTrim = s.startTrim;
+      _endTrim = s.endTrim;
+      _speed = s.speed;
+      _brightness = s.brightness;
+      _contrast = s.contrast;
+      _saturation = s.saturation;
+      _videoCanvasZoom = s.videoZoom;
+      _isMirrored = s.isMirrored;
+      _isReversed = s.isReversed;
+      _isMuted = s.isMuted;
+      _chromaKey = s.chromaKey;
+      _noiseReduction = s.noiseReduction;
+      _fadeTransition = s.fadeTransition;
+      _cinemaMask = s.cinemaMask;
+      _rotTurns = s.rotTurns;
+      _filterIdx = s.filterIdx;
+      _overlayText = s.overlayText;
+      _bilingualText = s.bilingualText;
+      _voiceFx = s.voiceFx;
+      _aspectRatio = s.aspectRatio;
+      _splits = List.from(s.splits);
+      _keyframes = List.from(s.keyframes);
+      _beats = List.from(s.beats);
+    });
+    _controller?.setPlaybackSpeed(_speed);
+    _controller?.setVolume(_isMuted ? 0.0 : 1.0);
+  }
+
+  void _undo() {
+    if (_undoStack.isEmpty) return;
+    _redoStack.add(_captureSnapshot());
+    final prev = _undoStack.removeLast();
+    _applySnapshot(prev);
+    _toast('↩️ Undo Applied');
+  }
+
+  void _redo() {
+    if (_redoStack.isEmpty) return;
+    _undoStack.add(_captureSnapshot());
+    final next = _redoStack.removeLast();
+    _applySnapshot(next);
+    _toast('↪️ Redo Applied');
+  }
+
+  // ==========================================
+  // ONLINE CLOUD TRANSLATION & AI CAPTIONS
+  // ==========================================
+  Future<void> _translateCaptionOnline(String targetLangCode) async {
+    final source = _overlayText.trim().isEmpty ? 'Welcome to our new video!' : _overlayText.trim();
+    setState(() => _isCloudBusy = true);
+    try {
+      final url = Uri.parse('https://api.mymemory.translated.net/get?q=${Uri.encodeComponent(source)}&langpair=en|$targetLangCode');
+      final res = await http.get(url);
+      final data = jsonDecode(res.body);
+      final translated = data['responseData']?['translatedText'] ?? '';
+      if (translated.isNotEmpty) {
+        _recordChange(() {
+          _overlayText = source;
+          _bilingualText = translated;
+        });
+        _toast('☁️ Online Cloud Translation Added!');
+      }
+    } catch (e) {
+      _toast('Cloud Error: Check Internet Connection');
+    } finally {
+      if (mounted) setState(() => _isCloudBusy = false);
+    }
+  }
+
+  // ==========================================
+  // REAL FFMPEG HARDWARE RENDERING ENGINE
+  // ==========================================
+  Future<void> _executeRealFFmpegExport() async {
+    if (_controller == null) return;
+    setState(() => _isExporting = true);
+    _controller!.pause();
+
+    try {
+      final dir = await getTemporaryDirectory();
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final startSec = (_startTrim / 1000.0).toStringAsFixed(2);
+      final durDouble = ((_endTrim - _startTrim) / 1000.0).clamp(0.5, 7200.0);
+      final durSec = durDouble.toStringAsFixed(2);
+
+      // 1. Real MP3 Audio Extraction
+      if (_exportFormat == 'MP3') {
+        final outMp3 = '${dir.path}/ArgonCut_Audio_$ts.mp3';
+        final cmd = '-y -ss $startSec -t $durSec -i "${_videoFile.path}" -vn -acodec libmp3lame -q:a 2 "$outMp3"';
+        final session = await FFmpegKit.execute(cmd);
+        if (ReturnCode.isSuccess(await session.getReturnCode())) {
+          await Share.shareXFiles([XFile(outMp3)], text: 'Extracted MP3 Audio');
+        } else {
+          throw Exception('MP3 FFmpeg encode failed');
+        }
+        setState(() => _isExporting = false);
+        return;
+      }
+
+      // 2. Build Real FFmpeg Video Filter Graph (-vf)
+      List<String> vf = [];
+      vf.add('eq=brightness=$_brightness:contrast=$_contrast:saturation=$_saturation');
+
+      if (_isMirrored) vf.add('hflip');
+      if (_isReversed) vf.add('reverse');
+      if (_rotTurns == 1) vf.add('transpose=1');
+      if (_rotTurns == 2) vf.add('transpose=2,transpose=2');
+      if (_rotTurns == 3) vf.add('transpose=2');
+      if (_chromaKey) vf.add('chromakey=0x00FF00:0.15:0.1');
+
+      if (_cinemaMask) {
+        vf.add('drawbox=x=0:y=0:w=iw:h=ih*0.12:color=black:t=fill,drawbox=x=0:y=ih*0.88:w=iw:h=ih*0.12:color=black:t=fill');
+      }
+
+      if (_fadeTransition) {
+        final outStart = (durDouble - 0.8).clamp(0.0, durDouble).toStringAsFixed(2);
+        vf.add('fade=t=in:st=0:d=0.8,fade=t=out:st=$outStart:d=0.8');
+      }
+
+      if (_speed != 1.0) {
+        final pts = (1.0 / _speed).toStringAsFixed(2);
+        vf.add('setpts=$pts*PTS');
+      }
+
+      if (_exportFormat != 'GIF') {
+        if (_exportRes == '720p') vf.add('scale=-2:720');
+        if (_exportRes == '1080p') vf.add('scale=-2:1080');
+        if (_exportRes == '4K') vf.add('scale=-2:2160');
+      }
+
+      // 3. Build Real FFmpeg Audio Filter Graph (-af)
+      List<String> af = [];
+      if (_isReversed) af.add('areverse');
+      if (_noiseReduction) af.add('highpass=f=200,lowpass=f=3000');
+      if (_speed != 1.0) af.add('atempo=$_speed');
+      if (_voiceFx == 'Chipmunk') af.add('asetrate=44100*1.35,aresample=44100');
+      if (_voiceFx == 'Deep Monster') af.add('asetrate=44100*0.72,aresample=44100');
+      if (_voiceFx == 'Echo') af.add('aecho=0.8:0.88:60:0.4');
+
+      final ext = _exportFormat.toLowerCase();
+      final outPath = '${dir.path}/ArgonCut_Pro_$ts.$ext';
+
+      final vfStr = vf.isNotEmpty ? '-vf "${vf.join(',')}"' : '';
+      final afStr = _isMuted ? '-an' : (af.isNotEmpty ? '-af "${af.join(',')}" -c:a aac' : '-c:a aac');
+
+      String cmd;
+      if (_exportFormat == 'GIF') {
+        cmd = '-y -ss $startSec -t $durSec -i "${_videoFile.path}" -vf "${vf.join(',')},fps=15,scale=480:-1" "$outPath"';
+      } else {
+        cmd = '-y -ss $startSec -t $durSec -i "${_videoFile.path}" $vfStr $afStr -r $_exportFps -c:v libx264 -preset ultrafast "$outPath"';
+      }
+
+      final session = await FFmpegKit.execute(cmd);
+      if (ReturnCode.isSuccess(await session.getReturnCode())) {
+        await Gal.putVideo(outPath);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('✅ Real Rendered $_exportFormat ($_exportRes) Saved to Gallery!'),
+              backgroundColor: Colors.teal,
+              action: SnackBarAction(
+                label: 'Share',
+                textColor: Colors.white,
+                onPressed: () => Share.shareXFiles([XFile(outPath)]),
+              ),
+            ),
+          );
+        }
+      } else {
+        throw Exception('FFmpeg processing failed');
+      }
+    } catch (e) {
+      _toast('Export Error: $e');
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
+  }
+
+  List<double> _colorMatrix() {
+    final double b = _brightness * 255.0;
+    final double c = _contrast;
+    final double s = _saturation;
+    final double inv = 1.0 - s;
+    final double R = 0.2126 * inv, G = 0.7152 * inv, B = 0.0722 * inv;
+    final double t = (1.0 - c) * 128.0 + b;
+    return [
+      c * (R + s), c * G, c * B, 0, t,
+      c * R, c * (G + s), c * B, 0, t,
+      c * R, c * G, c * (B + s), 0, t,
+      0, 0, 0, 1, 0,
+    ];
+  }
+
+  double _resolveRatio() {
+    if (_controller == null) return 9 / 16;
+    if (_aspectRatio == '9:16') return 9 / 16;
+    if (_aspectRatio == '16:9') return 16 / 9;
+    if (_aspectRatio == '1:1') return 1.0;
+    return _controller!.value.aspectRatio;
+  }
+
+  String _fmt(double ms) {
+    final d = Duration(milliseconds: ms.toInt());
+    return '${d.inMinutes.remainder(60).toString().padLeft(2, '0')}:${d.inSeconds.remainder(60).toString().padLeft(2, '0')}';
+  }
+
+  void _toast(String m) {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), duration: const Duration(milliseconds: 1400)));
+  }
+
+  void _showExportSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF141720),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setM) => Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Real Hardware FFmpeg Export', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF00E5FF))),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                children: ['MP4', 'MOV', 'MP3', 'GIF'].map((f) => ChoiceChip(
+                      label: Text(f),
+                      selected: _exportFormat == f,
+                      selectedColor: const Color(0xFF00E5FF),
+                      labelStyle: TextStyle(color: _exportFormat == f ? Colors.black : Colors.white, fontWeight: FontWeight.bold),
+                      onSelected: (_) => setM(() => _exportFormat = f),
+                    )).toList(),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                children: ['720p', '1080p', '4K'].map((r) => ChoiceChip(
+                      label: Text(r),
+                      selected: _exportRes == r,
+                      selectedColor: const Color(0xFF00E5FF),
+                      labelStyle: TextStyle(color: _exportRes == r ? Colors.black : Colors.white, fontWeight: FontWeight.bold),
+                      onSelected: (_) => setM(() => _exportRes = r),
+                    )).toList(),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E5FF), foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 14)),
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _executeRealFFmpegExport();
+                  },
+                  icon: const Icon(Icons.bolt),
+                  label: Text('Render & Save $_exportFormat', style: const TextStyle(fontWeight: FontWeight.w900)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ready = _controller != null && _controller!.value.isInitialized;
+    final totalMs = ready ? _controller!.value.duration.inMilliseconds.toDouble().clamp(500.0, 36000000.0) : 1000.0;
+    final curMs = ready ? _controller!.value.position.inMilliseconds.toDouble().clamp(0.0, totalMs) : 0.0;
+
+    return Scaffold(
+      // ==========================================
+      // 1. CAPCUT TOP BAR (RES, UNDO, REDO, EXPORT)
+      // ==========================================
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0A0B0E),
+        elevation: 0,
+        leading: IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+        titleSpacing: 0,
+        title: Row(
+          children: [
+            GestureDetector(
+              onTap: _showExportSheet,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(color: const Color(0xFF1A1D26), borderRadius: BorderRadius.circular(6)),
+                child: Row(
+                  children: [
+                    Text('$_exportRes • ${_exportFps}fps', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    const Icon(Icons.arrow_drop_down, size: 16),
+                  ],
+                ),
+              ),
+            ),
+            const Spacer(),
+            // UNDO BUTTON
+            IconButton(
+              icon: Icon(Icons.undo_rounded, color: _undoStack.isNotEmpty ? Colors.white : Colors.white24),
+              tooltip: 'Undo',
+              onPressed: _undoStack.isNotEmpty ? _undo : null,
+            ),
+            // REDO BUTTON
+            IconButton(
+              icon: Icon(Icons.redo_rounded, color: _redoStack.isNotEmpty ? Colors.white : Colors.white24),
+              tooltip: 'Redo',
+              onPressed: _redoStack.isNotEmpty ? _redo : null,
+            ),
+          ],
+        ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00E5FF),
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              ),
+              onPressed: _isExporting ? null : _showExportSheet,
+              child: Text(_isExporting ? 'Rendering...' : 'Export', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12)),
+            ),
+          ),
+        ],
+      ),
+      body: !ready
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                // ==========================================
+                // 2. HAND PINCH-TO-ZOOM VIDEO PREVIEW STAGE
+                // ==========================================
+                Expanded(
+                  child: GestureDetector(
+                    onScaleStart: (d) {
+                      _baseVideoCanvasZoom = _videoCanvasZoom;
+                    },
+                    onScaleUpdate: (d) {
+                      setState(() {
+                        _videoCanvasZoom = (_baseVideoCanvasZoom * d.scale).clamp(0.5, 4.0);
+                        _videoPanOffset += d.focalPointDelta;
+                      });
+                    },
+                    onDoubleTap: () {
+                      _recordChange(() {
+                        _videoCanvasZoom = 1.0;
+                        _videoPanOffset = Offset.zero;
+                      });
+                      _toast('🔄 Reset Canvas Zoom');
+                    },
+                    child: Container(
+                      color: Colors.black,
+                      width: double.infinity,
+                      child: LayoutBuilder(
+                        builder: (ctx, box) => Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            AspectRatio(
+                              aspectRatio: _resolveRatio(),
+                              child: ClipRect(
+                                child: Transform.translate(
+                                  offset: _videoPanOffset,
+                                  child: Transform.scale(
+                                    scale: _videoCanvasZoom,
+                                    child: Transform(
+                                      alignment: Alignment.center,
+                                      transform: Matrix4.identity()..scale(_isMirrored ? -1.0 : 1.0, 1.0, 1.0),
+                                      child: RotatedBox(
+                                        quarterTurns: _rotTurns,
+                                        child: ColorFiltered(
+                                          colorFilter: ColorFilter.matrix(_colorMatrix()),
+                                          child: VideoPlayer(_controller!),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            if (_cinemaMask) ...[
+                              Positioned(top: 0, left: 0, right: 0, height: 28, child: Container(color: Colors.black)),
+                              Positioned(bottom: 0, left: 0, right: 0, height: 28, child: Container(color: Colors.black)),
+                            ],
+
+                            // Pinch-Zoomable & Draggable Text Overlay
+                            if (_overlayText.isNotEmpty)
+                              Positioned(
+                                left: (_textPos.dx * box.maxWidth - 90).clamp(10.0, box.maxWidth - 160),
+                                top: (_textPos.dy * box.maxHeight - 25).clamp(10.0, box.maxHeight - 65),
+                                child: GestureDetector(
+                                  onScaleStart: (_) => _baseTextScale = _textScale,
+                                  onScaleUpdate: (d) {
+                                    setState(() {
+                                      _textScale = (_baseTextScale * d.scale).clamp(0.6, 3.0);
+                                      _textPos = Offset(
+                                        (_textPos.dx + d.focalPointDelta.dx / box.maxWidth).clamp(0.05, 0.92),
+                                        (_textPos.dy + d.focalPointDelta.dy / box.maxHeight).clamp(0.05, 0.92),
+                                      );
+                                    });
+                                  },
+                                  child: Transform.scale(
+                                    scale: _textScale,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black87,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: const Color(0xFF00E5FF), width: 1),
+                                      ),
+                                      child: Column(
+                                        children: [
+                                          Text(_overlayText, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                                          if (_bilingualText.isNotEmpty)
+                                            Text(_bilingualText, style: const TextStyle(color: Colors.amberAccent, fontSize: 14, fontWeight: FontWeight.bold)),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+
+                            // Zoom indicator pill
+                            Positioned(
+                              bottom: 8,
+                              right: 10,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+                                child: Text('🤏 Canvas: ${_videoCanvasZoom.toStringAsFixed(1)}x', style: const TextStyle(fontSize: 10, color: Colors.white70)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                // ==========================================
+                // 3. PLAYBACK CONTROLS & TIME READOUT
+                // ==========================================
+                Container(
+                  color: const Color(0xFF0F1117),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: Icon(_controller!.value.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, color: Colors.white, size: 28),
+                        onPressed: () => setState(() => _controller!.value.isPlaying ? _controller!.pause() : _controller!.play()),
+                      ),
+                      Text('${_fmt(curMs)} / ${_fmt(totalMs)}', style: const TextStyle(fontSize: 12, color: Colors.white70, fontWeight: FontWeight.w600)),
+                      const Spacer(),
+                      Text('Timeline Zoom: ${_timelineZoom.toStringAsFixed(1)}x', style: const TextStyle(fontSize: 11, color: Color(0xFF00E5FF))),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.diamond_outlined, size: 20, color: Colors.amberAccent),
+                        tooltip: 'Add Keyframe',
+                        onPressed: () {
+                          _recordChange(() => _keyframes.add((curMs / totalMs).clamp(0.02, 0.98)));
+                          _toast('♦ Keyframe Added');
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+
+                // ==========================================
+                // 4. CAPCUT HAND PINCH-TO-ZOOM TIMELINE
+                // ==========================================
+                GestureDetector(
+                  onScaleStart: (_) {
+                    _baseTimelineZoom = _timelineZoom;
+                  },
+                  onScaleUpdate: (details) {
+                    setState(() {
+                      // Two-finger hand pinch zoom on timeline (0.8x to 5.0x)
+                      _timelineZoom = (_baseTimelineZoom * details.scale).clamp(0.8, 5.0);
+                    });
+                  },
+                  child: Container(
+                    height: 125,
+                    color: const Color(0xFF0A0B0E),
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: EdgeInsets.symmetric(horizontal: MediaQuery.of(context).size.width * 0.5),
+                          child: GestureDetector(
+                            onTapDown: (d) {
+                              final trackWidth = 320.0 * _timelineZoom;
+                              final ratio = (d.localPosition.dx / trackWidth).clamp(0.0, 1.0);
+                              _controller!.seekTo(Duration(milliseconds: (ratio * totalMs).toInt()));
+                            },
+                            child: SizedBox(
+                              width: 320.0 * _timelineZoom,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Time Ruler
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: List.generate(
+                                      (5 * _timelineZoom).round().clamp(4, 20),
+                                      (i) => Text(
+                                        _fmt((totalMs / ((5 * _timelineZoom).round().clamp(4, 20))) * i),
+                                        style: const TextStyle(fontSize: 9, color: Colors.white38),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+
+                                  // Main Video Filmstrip Track
+                                  Container(
+                                    height: 44,
+                                    width: 320.0 * _timelineZoom,
+                                    decoration: BoxDecoration(
+                                      gradient: const LinearGradient(colors: [Color(0xFF1E293B), Color(0xFF334155), Color(0xFF1E293B)]),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.white54, width: 1.5),
+                                    ),
+                                    child: Stack(
+                                      alignment: Alignment.centerLeft,
+                                      children: [
+                                        Padding(
+                                          padding: const EdgeInsets.only(left: 10),
+                                          child: Text(
+                                            '🎬 Clip (${_speed}x)  •  Pinch with 2 fingers to Zoom Timeline',
+                                            style: const TextStyle(fontSize: 10, color: Colors.white70, fontWeight: FontWeight.w600),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        // Split Cut Lines
+                                        ..._splits.map((s) => Positioned(
+                                              left: s * 320.0 * _timelineZoom,
+                                              top: 0,
+                                              bottom: 0,
+                                              child: Container(width: 3, color: Colors.black),
+                                            )),
+                                        // Keyframe Diamonds
+                                        ..._keyframes.map((k) => Positioned(
+                                              left: k * 320.0 * _timelineZoom,
+                                              child: const Icon(Icons.diamond, size: 14, color: Colors.amberAccent),
+                                            )),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 5),
+
+                                  // Audio & Beats Track
+                                  Container(
+                                    height: 24,
+                                    width: 320.0 * _timelineZoom,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF0F292A),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Stack(
+                                      alignment: Alignment.centerLeft,
+                                      children: [
+                                        Padding(
+                                          padding: const EdgeInsets.only(left: 8),
+                                          child: Text(
+                                            _isMuted ? '🔇 Audio Muted' : '🎵 Original Sound ($_voiceFx)',
+                                            style: const TextStyle(fontSize: 9, color: Color(0xFF00E5FF)),
+                                          ),
+                                        ),
+                                        ..._beats.map((b) => Positioned(
+                                              left: b * 320.0 * _timelineZoom,
+                                              child: Container(width: 6, height: 6, decoration: const BoxDecoration(color: Colors.yellowAccent, shape: BoxShape.circle)),
+                                            )),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // Fixed Center White CapCut Playhead Line
+                        IgnorePointer(
+                          child: Container(
+                            width: 2,
+                            height: 115,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // ==========================================
+                // 5. COLLAPSIBLE CONTEXTUAL SUB-PANEL
+                // ==========================================
+                if (_activeToolPanel != -1)
+                  Container(
+                    height: 135,
+                    color: const Color(0xFF141720),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    child: _buildContextualSubPanel(totalMs, curMs),
+                  ),
+
+                // ==========================================
+                // 6. CAPCUT CLEAN BOTTOM MAIN ACTION BAR
+                // ==========================================
+                Container(
+                  height: 64,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF0F1117),
+                    border: Border(top: BorderSide(color: Colors.white12, width: 0.5)),
+                  ),
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    children: [
+                      _capcutBottomItem(0, Icons.content_cut_rounded, 'Edit'),
+                      _capcutBottomItem(1, Icons.Graphic_eq_rounded, 'Audio'),
+                      _capcutBottomItem(2, Icons.text_fields_rounded, 'Text & AI Sub'),
+                      _capcutBottomItem(3, Icons.auto_fix_high_rounded, 'Effects'),
+                      _capcutBottomItem(4, Icons.filter_vintage_rounded, 'Filters'),
+                      _capcutBottomItem(5, Icons.tune_rounded, 'Adjust'),
+                      _capcutBottomItem(6, Icons.aspect_ratio_rounded, 'Ratio'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _capcutBottomItem(int index, IconData icon, String label) {
+    final active = _activeToolPanel == index;
+    return GestureDetector(
+      onTap: () => setState(() => _activeToolPanel = active ? -1 : index),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 15),
+        alignment: Alignment.center,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: active ? const Color(0xFF00E5FF) : Colors.white70, size: 22),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: active ? FontWeight.bold : FontWeight.normal,
+                color: active ? const Color(0xFF00E5FF) : Colors.white70,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContextualSubPanel(double totalMs, double curMs) {
+    switch (_activeToolPanel) {
+      case 0: // EDIT (Split, Speed, Reverse, Mirror, Rotate, Trim)
+        return ListView(
+          children: [
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _subBtn(Icons.content_cut, 'Split', () {
+                    _recordChange(() => _splits.add((curMs / totalMs).clamp(0.05, 0.95)));
+                    _toast('✂️ Split Added');
+                  }),
+                  _subBtn(Icons.flip, 'Mirror', () => _recordChange(() => _isMirrored = !_isMirrored)),
+                  _subBtn(Icons.rotate_90_degrees_ccw, 'Rotate', () => _recordChange(() => _rotTurns = (_rotTurns + 1) % 4)),
+                  _subBtn(Icons.fast_rewind, _isReversed ? 'Normal Dir' : 'Reverse', () => _recordChange(() => _isReversed = !_isReversed)),
+                  ...[0.5, 1.0, 1.5, 2.0].map((s) => Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: ChoiceChip(
+                          label: Text('${s}x', style: const TextStyle(fontSize: 11)),
+                          selected: _speed == s,
+                          selectedColor: const Color(0xFF00E5FF),
+                          labelStyle: TextStyle(color: _speed == s ? Colors.black : Colors.white),
+                          onSelected: (_) {
+                            _recordChange(() => _speed = s);
+                            _controller!.setPlaybackSpeed(s);
+                          },
+                        ),
+                      )),
+                ],
+              ),
+            ),
+            SizedBox(
+              height: 36,
+              child: RangeSlider(
+                values: RangeValues(_startTrim.clamp(0.0, totalMs), _endTrim.clamp(0.0, totalMs)),
+                min: 0.0,
+                max: totalMs,
+                onChangeStart: (_) => _undoStack.add(_captureSnapshot()),
+                onChanged: (v) => setState(() {
+                  _startTrim = v.start;
+                  _endTrim = v.end;
+                }),
+              ),
+            ),
+          ],
+        );
+
+      case 1: // AUDIO (Mute, Voice FX, Denoise, Beats, Extract MP3)
+        return ListView(
+          children: [
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _subBtn(_isMuted ? Icons.volume_off : Icons.volume_up, _isMuted ? 'Unmute' : 'Mute', () {
+                    _recordChange(() => _isMuted = !_isMuted);
+                    _controller!.setVolume(_isMuted ? 0.0 : 1.0);
+                  }),
+                  _subBtn(Icons.Noise_control_off, _noiseReduction ? 'Denoise ON' : 'Reduce Noise', () {
+                    _recordChange(() => _noiseReduction = !_noiseReduction);
+                  }),
+                  _subBtn(Icons.auto_graph, 'Auto Beats 🟡', () {
+                    _recordChange(() => _beats = [0.15, 0.3, 0.45, 0.6, 0.75, 0.9]);
+                  }),
+                  _subBtn(Icons.audiotrack, 'Export MP3', () {
+                    setState(() => _exportFormat = 'MP3');
+                    _executeRealFFmpegExport();
+                  }),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: ['Normal', 'Chipmunk', 'Deep Monster', 'Echo'].map((vf) => Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(vf, style: const TextStyle(fontSize: 11)),
+                        selected: _voiceFx == vf,
+                        selectedColor: const Color(0xFF00E5FF),
+                        labelStyle: TextStyle(color: _voiceFx == vf ? Colors.black : Colors.white),
+                        onSelected: (_) => _recordChange(() => _voiceFx = vf),
+                      ),
+                    )).toList(),
+              ),
+            ),
+          ],
+        );
+
+      case 2: // TEXT & ONLINE CLOUD SUBTITLES
+        return ListView(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 38,
+                    child: TextField(
+                      decoration: InputDecoration(
+                        hintText: 'ویڈیو کے لیے ٹیکسٹ لکھیں...',
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                        filled: true,
+                        fillColor: const Color(0xFF1E2230),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onChanged: (v) => setState(() => _overlayText = v),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (_isCloudBusy)
+                  const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                else ...[
+                  _subBtn(Icons.cloud_download, '☁️ Urdu Sub', () => _translateCaptionOnline('ur')),
+                  _subBtn(Icons.cloud_download, '☁️ Arabic', () => _translateCaptionOnline('ar')),
+                ],
+              ],
+            ),
+          ],
+        );
+
+      case 3: // EFFECTS & MASKING (Real FFmpeg Fade, Cinema Bars, Chroma Key)
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilterChip(
+              label: const Text('✨ Fade In/Out Transition'),
+              selected: _fadeTransition,
+              onSelected: (v) => _recordChange(() => _fadeTransition = v),
+            ),
+            FilterChip(
+              label: const Text('🎬 Cinema Bars Mask'),
+              selected: _cinemaMask,
+              onSelected: (v) => _recordChange(() => _cinemaMask = v),
+            ),
+            FilterChip(
+              label: const Text('🟩 Chroma Key (Green Screen)'),
+              selected: _chromaKey,
+              onSelected: (v) => _recordChange(() => _chromaKey = v),
+            ),
+          ],
+        );
+
+      case 4: // FILTERS / LUTS
+        return ListView.builder(
+          scrollDirection: Axis.horizontal,
+          itemCount: _filters.length,
+          itemBuilder: (ctx, i) {
+            final sel = _filterIdx == i;
+            return GestureDetector(
+              onTap: () {
+                final f = _filters[i];
+                _recordChange(() {
+                  _filterIdx = i;
+                  _brightness = f['b'];
+                  _contrast = f['c'];
+                  _saturation = f['s'];
+                });
+              },
+              child: Container(
+                width: 88,
+                margin: const EdgeInsets.only(right: 10),
+                decoration: BoxDecoration(
+                  color: sel ? const Color(0xFF00E5FF) : const Color(0xFF1E2230),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  _filters[i]['n'],
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: sel ? Colors.black : Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+              ),
+            );
+          },
+        );
+
+      case 5: // ADJUST (Brightness, Contrast, Saturation)
+        return ListView(
+          children: [
+            _adjSlider('Brightness', _brightness, -0.4, 0.4, (v) => setState(() => _brightness = v)),
+            _adjSlider('Contrast', _contrast, 0.5, 2.0, (v) => setState(() => _contrast = v)),
+            _adjSlider('Saturation', _saturation, 0.0, 2.5, (v) => setState(() => _saturation = v)),
+          ],
+        );
+
+      case 6: // RATIO / CANVAS
+        return Center(
+          child: Wrap(
+            spacing: 10,
+            children: ['Original', '9:16', '16:9', '1:1'].map((r) => ChoiceChip(
+                  label: Text(r),
+                  selected: _aspectRatio == r,
+                  selectedColor: const Color(0xFF00E5FF),
+                  labelStyle: TextStyle(color: _aspectRatio == r ? Colors.black : Colors.white, fontWeight: FontWeight.bold),
+                  onSelected: (_) => _recordChange(() => _aspectRatio = r),
+                )).toList(),
+          ),
+        );
+
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Widget _subBtn(IconData ic, String label, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white24)),
+        onPressed: onTap,
+        icon: Icon(ic, size: 16, color: const Color(0xFF00E5FF)),
+        label: Text(label, style: const TextStyle(fontSize: 11)),
+      ),
+    );
+  }
+
+  Widget _adjSlider(String label, double val, double min, double max, ValueChanged<double> onChanged) {
+    return SizedBox(
+      height: 30,
+      child: Row(
+        children: [
+          SizedBox(width: 80, child: Text(label, style: const TextStyle(fontSize: 11))),
+          Expanded(
+            child: Slider(
+              value: val.clamp(min, max),
+              min: min,
+              max: max,
+              onChangeStart: (_) => _undoStack.add(_captureSnapshot()),
+              onChanged: onChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
