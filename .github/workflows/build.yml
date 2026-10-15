@@ -21,22 +21,47 @@ jobs:
       - name: Setup Flutter SDK
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.0'
+          flutter-version: '3.24.5'
           channel: 'stable'
 
-      - name: Generate Android Platform Files & Permissions
+      - name: Generate Android Platform & Fix Packages
         run: |
-          mkdir -p backup_code
-          cp pubspec.yaml backup_code/
-          cp -r lib backup_code/
-          flutter create --org com.argon.capcutpro --project-name pro_video_editor .
-          cp backup_code/pubspec.yaml .
-          cp -r backup_code/lib/* lib/
-          rm -rf backup_code
+          mkdir -p /tmp/backup_app
+          cp -r lib /tmp/backup_app/
 
-          # Set minSdkVersion to 24 (Required for Full GPL FFmpeg Engine)
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/g' android/app/build.gradle
+          flutter create --org com.argon.capcutpro --project-name pro_video_editor .
+
+          cp -r /tmp/backup_app/lib/* lib/
+
+          # Write compatible pubspec.yaml (fixes :gal Gradle error)
+          cat << 'EOF' > pubspec.yaml
+          name: pro_video_editor
+          description: CapCut Style Advanced Mobile Video Editor
+          publish_to: 'none'
+          version: 2.0.0+1
+
+          environment:
+            sdk: '>=3.2.0 <4.0.0'
+
+          dependencies:
+            flutter:
+              sdk: flutter
+            video_player: ^2.9.1
+            image_picker: ^1.1.2
+            path_provider: ^2.1.4
+            ffmpeg_kit_flutter_full_gpl: ^6.0.3
+            gal: 2.1.1
+            share_plus: ^10.0.0
+
+          flutter:
+            uses-material-design: true
+          EOF
+
+          # Set compileSdk 34 and minSdk 24 in android/app/build.gradle
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 34/g' android/app/build.gradle
+          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 34/g' android/app/build.gradle
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 24/g' android/app/build.gradle
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 24/g' android/app/build.gradle
 
           # Inject Camera, Mic, Storage & Media Permissions
           sed -i '/<application/i <uses-permission android:name="android.permission.CAMERA"/>\n<uses-permission android:name="android.permission.RECORD_AUDIO"/>\n<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>\n<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>\n<uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>' android/app/src/main/AndroidManifest.xml
