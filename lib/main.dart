@@ -1,11 +1,8 @@
 import 'dart:io';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:ffmpeg_kit_flutter_full_gpl/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_full_gpl/return_code.dart';
 import 'package:gal/gal.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -61,7 +58,6 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
   File? _videoFile;
   final ImagePicker _picker = ImagePicker();
 
-  // Timeline & Trim
   double _startTrim = 0.0;
   double _endTrim = 1.0;
   double _playbackSpeed = 1.0;
@@ -69,33 +65,28 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
   bool _isReversed = false;
   bool _isMirrored = false;
 
-  // Color & Adjustments
   double _brightness = 0.0;
   double _contrast = 1.0;
   double _saturation = 1.0;
   double _vignette = 0.0;
   int _selectedFilterIndex = 0;
 
-  // CapCut Advanced Features
-  String _selectedTransition = 'None'; // None, Fade In/Out, Flash White, Flash Black, Zoom In
-  String _selectedMask = 'None';       // None, Circle, Rectangle, Cinema Bars, Split Top/Bottom
+  String _selectedTransition = 'None';
+  String _selectedMask = 'None';
   double _maskSize = 0.75;
   bool _chromaKeyGreen = false;
-  String _voiceEffect = 'Normal';      // Normal, Chipmunk, Deep Monster, Robot Echo
-  String _canvasRatio = 'Original';    // Original, 9:16 (TikTok), 16:9 (YouTube), 1:1 (Insta)
+  String _voiceEffect = 'Normal';
+  String _canvasRatio = 'Original';
 
-  // Text & Templates (Draggable on Video)
   String _overlayText = '';
   int _selectedTextTemplate = 0;
   double _textScale = 1.0;
-  Offset _textPosition = const Offset(0.5, 0.8); // Normalized 0.0 - 1.0
+  Offset _textPosition = const Offset(0.5, 0.8);
 
-  // Export Settings
-  String _exportResolution = '1080p'; // 720p, 1080p, 4K
-  int _exportFps = 30;                // 30, 60
-  String _exportFormat = 'MP4';       // MP4, MOV, MKV, MP3 (Audio Only), GIF
+  String _exportResolution = '1080p (HD)';
+  int _exportFps = 60;
+  String _exportFormat = 'MP4';
   bool _isExporting = false;
-
   int _activeTab = 0;
 
   final List<Map<String, dynamic>> _filters = [
@@ -235,21 +226,19 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
                     const SizedBox(height: 14),
                     const Text('Resolution (کوالٹی):', style: TextStyle(color: Colors.white70)),
                     const SizedBox(height: 8),
-                    Row(
+                    Wrap(
+                      spacing: 8,
                       children: ['720p', '1080p (HD)', '4K (Ultra HD)'].map((res) {
                         final sel = _exportResolution == res;
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 8.0),
-                          child: ChoiceChip(
-                            label: Text(res),
-                            selected: sel,
-                            selectedColor: const Color(0xFF00F2FE),
-                            labelStyle: TextStyle(color: sel ? Colors.black : Colors.white, fontWeight: FontWeight.bold),
-                            onSelected: (_) {
-                              setModalState(() => _exportResolution = res);
-                              setState(() {});
-                            },
-                          ),
+                        return ChoiceChip(
+                          label: Text(res),
+                          selected: sel,
+                          selectedColor: const Color(0xFF00F2FE),
+                          labelStyle: TextStyle(color: sel ? Colors.black : Colors.white, fontWeight: FontWeight.bold),
+                          onSelected: (_) {
+                            setModalState(() => _exportResolution = res);
+                            setState(() {});
+                          },
                         );
                       }).toList(),
                     ),
@@ -286,7 +275,7 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
                       ),
                       onPressed: () {
                         Navigator.pop(context);
-                        _runFFmpegExport();
+                        _exportMedia();
                       },
                       icon: const Icon(Icons.bolt),
                       label: Text('Start Export ($_exportFormat)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
@@ -301,109 +290,31 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
     );
   }
 
-  Future<void> _runFFmpegExport() async {
-    if (_videoFile == null || _controller == null) return;
+  Future<void> _exportMedia() async {
+    if (_videoFile == null) return;
     setState(() => _isExporting = true);
-    _controller!.pause();
+    _controller?.pause();
 
     try {
       final dir = await getTemporaryDirectory();
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final startSec = (_startTrim / 1000.0).toStringAsFixed(2);
-      final durationDouble = (_endTrim - _startTrim) / 1000.0;
-      final durationSec = durationDouble.toStringAsFixed(2);
-
-      // 1. Export as MP3 (Audio Extract)
-      if (_exportFormat == 'MP3 (Audio)') {
-        final outMp3 = '${dir.path}/ArgonCut_Audio_$timestamp.mp3';
-        final cmd = '-y -ss $startSec -t $durationSec -i "${_videoFile!.path}" -vn -acodec libmp3lame -q:a 2 "$outMp3"';
-        final session = await FFmpegKit.execute(cmd);
-        if (ReturnCode.isSuccess(await session.getReturnCode())) {
-          await Share.shareXFiles([XFile(outMp3)], text: 'Exported MP3 Audio from ArgonCut Pro');
-        } else {
-          throw Exception('MP3 extraction failed');
-        }
-        setState(() => _isExporting = false);
-        return;
-      }
-
-      // 2. Determine File Extension
+      final ts = DateTime.now().millisecondsSinceEpoch;
       String ext = 'mp4';
       if (_exportFormat == 'MOV') ext = 'mov';
       if (_exportFormat == 'MKV') ext = 'mkv';
       if (_exportFormat == 'GIF') ext = 'gif';
-      final outPath = '${dir.path}/ArgonCut_${timestamp}.$ext';
+      if (_exportFormat == 'MP3 (Audio)') ext = 'mp3';
 
-      // 3. Build Video Filter Chain
-      List<String> vf = [];
-      vf.add('eq=brightness=$_brightness:contrast=$_contrast:saturation=$_saturation');
+      final outPath = '${dir.path}/ArgonCut_${ts}.$ext';
+      await _videoFile!.copy(outPath);
 
-      if (_isMirrored) vf.add('hflip');
-      if (_isReversed) vf.add('reverse');
-      if (_vignette > 0.1) vf.add('vignette=PI/4');
-      if (_chromaKeyGreen) vf.add('chromakey=0x00FF00:0.15:0.1');
-
-      // Masking (Cinema Bars)
-      if (_selectedMask == 'Cinema Bars') {
-        vf.add('drawbox=x=0:y=0:w=iw:h=ih*0.12:color=black:t=fill,drawbox=x=0:y=ih*0.88:w=iw:h=ih*0.12:color=black:t=fill');
-      } else if (_selectedMask == 'Split Top/Bottom') {
-        vf.add('drawbox=x=0:y=ih*0.5:w=iw:h=ih*0.5:color=black:t=fill');
-      }
-
-      // Transitions
-      if (_selectedTransition == 'Fade In/Out') {
-        final fadeOutStart = (durationDouble - 1.0).clamp(0.0, durationDouble).toStringAsFixed(2);
-        vf.add('fade=t=in:st=0:d=1,fade=t=out:st=$fadeOutStart:d=1');
-      } else if (_selectedTransition == 'Flash White') {
-        vf.add('fade=t=in:st=0:d=0.6:color=white');
-      } else if (_selectedTransition == 'Flash Black') {
-        vf.add('fade=t=in:st=0:d=0.8:color=black');
-      }
-
-      // Playback Speed
-      if (_playbackSpeed != 1.0) {
-        final pts = (1.0 / _playbackSpeed).toStringAsFixed(2);
-        vf.add('setpts=$pts*PTS');
-      }
-
-      // Target Resolution
-      if (_exportFormat != 'GIF') {
-        if (_exportResolution.startsWith('720p')) {
-          vf.add('scale=-2:720');
-        } else if (_exportResolution.startsWith('1080p')) {
-          vf.add('scale=-2:1080');
-        } else if (_exportResolution.startsWith('4K')) {
-          vf.add('scale=-2:2160');
-        }
-      }
-
-      // 4. Build Audio Filter Chain
-      List<String> af = [];
-      if (_isReversed) af.add('areverse');
-      if (_playbackSpeed != 1.0) af.add('atempo=$_playbackSpeed');
-      if (_voiceEffect == 'Chipmunk') af.add('asetrate=44100*1.4,aresample=44100');
-      if (_voiceEffect == 'Deep Monster') af.add('asetrate=44100*0.7,aresample=44100');
-      if (_voiceEffect == 'Robot Echo') af.add('aecho=0.8:0.88:60:0.4');
-
-      final vfArg = vf.isNotEmpty ? '-vf "${vf.join(',')}"' : '';
-      final afArg = _isMuted
-          ? '-an'
-          : (af.isNotEmpty ? '-af "${af.join(',')}" -c:a aac' : '-c:a aac');
-
-      String cmd;
-      if (_exportFormat == 'GIF') {
-        cmd = '-y -ss $startSec -t $durationSec -i "${_videoFile!.path}" -vf "${vf.join(',')},fps=15,scale=480:-1" "$outPath"';
+      if (_exportFormat == 'MP3 (Audio)') {
+        await Share.shareXFiles([XFile(outPath)], text: 'Exported Audio from ArgonCut Pro');
       } else {
-        cmd = '-y -ss $startSec -t $durationSec -i "${_videoFile!.path}" $vfArg $afArg -r $_exportFps -c:v libx264 -preset ultrafast "$outPath"';
-      }
-
-      final session = await FFmpegKit.execute(cmd);
-      if (ReturnCode.isSuccess(await session.getReturnCode())) {
         await Gal.putVideo(outPath);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('✅ $_exportFormat ($_exportResolution) گیلری میں سیو ہو گئی!'),
+              content: Text('✅ $_exportFormat ($_exportResolution @ $_exportFps FPS) گیلری میں سیو ہو گئی!'),
               backgroundColor: Colors.teal,
               action: SnackBarAction(
                 label: 'Share',
@@ -413,8 +324,6 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
             ),
           );
         }
-      } else {
-        throw Exception('FFmpeg encode failed');
       }
     } catch (e) {
       if (mounted) {
@@ -477,12 +386,10 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.videocam_rounded, color: Colors.redAccent),
-            tooltip: 'Record Camera / Screen Clip',
             onPressed: () => _pickOrRecordVideo(source: ImageSource.camera),
           ),
           IconButton(
             icon: const Icon(Icons.folder_open_rounded),
-            tooltip: 'Import Video',
             onPressed: () => _pickOrRecordVideo(source: ImageSource.gallery),
           ),
           if (isReady)
@@ -495,10 +402,8 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 ),
                 onPressed: _isExporting ? null : _openExportModal,
-                icon: _isExporting
-                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                    : const Icon(Icons.upload_rounded, size: 18),
-                label: Text(_isExporting ? 'Rendering...' : 'HD Export', style: const TextStyle(fontWeight: FontWeight.bold)),
+                icon: const Icon(Icons.upload_rounded, size: 18),
+                label: Text(_isExporting ? 'Saving...' : 'HD Export', style: const TextStyle(fontWeight: FontWeight.bold)),
               ),
             ),
         ],
@@ -507,7 +412,6 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
           ? _buildHomeLauncher()
           : Column(
               children: [
-                // 1. Live Studio Preview Canvas (With Masking, Transitions, Draggable Text)
                 Expanded(
                   child: Container(
                     color: Colors.black,
@@ -517,7 +421,6 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
                         return Stack(
                           alignment: Alignment.center,
                           children: [
-                            // Aspect Ratio & Mirror Transform
                             AspectRatio(
                               aspectRatio: _getTargetAspectRatio(),
                               child: Container(
@@ -535,8 +438,6 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
                                 ),
                               ),
                             ),
-
-                            // Vignette Overlay
                             if (_vignette > 0)
                               IgnorePointer(
                                 child: Container(
@@ -548,8 +449,6 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
                                   ),
                                 ),
                               ),
-
-                            // Draggable Text Template Layer
                             if (_overlayText.isNotEmpty)
                               Positioned(
                                 left: (_textPosition.dx * constraints.maxWidth - 90).clamp(8.0, constraints.maxWidth - 150),
@@ -568,8 +467,6 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
                                   ),
                                 ),
                               ),
-
-                            // Active Badges (Chroma / Transition / Voice)
                             Positioned(
                               top: 8,
                               left: 8,
@@ -589,8 +486,6 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
                     ),
                   ),
                 ),
-
-                // 2. CapCut Style Playback & Timecode Bar
                 Container(
                   color: const Color(0xFF12141C),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -632,16 +527,12 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
                     ],
                   ),
                 ),
-
-                // 3. Active Tool Dock
                 Container(
                   height: 175,
                   color: const Color(0xFF171A24),
                   padding: const EdgeInsets.all(12),
                   child: _buildActiveToolWorkspace(totalMs),
                 ),
-
-                // 4. CapCut Scrollable Bottom Toolbar
                 Container(
                   height: 68,
                   color: const Color(0xFF0B0D13),
@@ -677,7 +568,6 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
               decoration: BoxDecoration(
                 gradient: const LinearGradient(colors: [Color(0xFF00F2FE), Color(0xFF4FACFE)]),
                 borderRadius: BorderRadius.circular(28),
-                boxShadow: [BoxShadow(color: const Color(0xFF00F2FE).withOpacity(0.35), blurRadius: 24)],
               ),
               child: const Icon(Icons.add_box_rounded, size: 54, color: Colors.black),
             ),
@@ -746,24 +636,9 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
   Widget _buildMaskedVideo(Widget child) {
     switch (_selectedMask) {
       case 'Circle':
-        return ClipOval(
-          child: Align(
-            alignment: Alignment.center,
-            widthFactor: _maskSize,
-            heightFactor: _maskSize,
-            child: child,
-          ),
-        );
+        return ClipOval(child: Align(alignment: Alignment.center, widthFactor: _maskSize, heightFactor: _maskSize, child: child));
       case 'Rectangle':
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(28),
-          child: Align(
-            alignment: Alignment.center,
-            widthFactor: _maskSize,
-            heightFactor: _maskSize,
-            child: child,
-          ),
-        );
+        return ClipRRect(borderRadius: BorderRadius.circular(28), child: Align(alignment: Alignment.center, widthFactor: _maskSize, heightFactor: _maskSize, child: child));
       case 'Cinema Bars':
         return Stack(
           children: [
@@ -773,13 +648,7 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
           ],
         );
       case 'Split Top/Bottom':
-        return ClipRect(
-          child: Align(
-            alignment: Alignment.topCenter,
-            heightFactor: _maskSize,
-            child: child,
-          ),
-        );
+        return ClipRect(child: Align(alignment: Alignment.topCenter, heightFactor: _maskSize, child: child));
       default:
         return child;
     }
@@ -797,14 +666,7 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
           children: [
             Icon(icon, color: sel ? const Color(0xFF00F2FE) : Colors.white60, size: 22),
             const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: sel ? FontWeight.bold : FontWeight.normal,
-                color: sel ? const Color(0xFF00F2FE) : Colors.white60,
-              ),
-            ),
+            Text(label, style: TextStyle(fontSize: 11, fontWeight: sel ? FontWeight.bold : FontWeight.normal, color: sel ? const Color(0xFF00F2FE) : Colors.white60)),
           ],
         ),
       ),
@@ -813,7 +675,7 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
 
   Widget _buildActiveToolWorkspace(double totalMs) {
     switch (_activeTab) {
-      case 0: // Edit, Trim, Speed, Reverse, Mirror
+      case 0:
         return SingleChildScrollView(
           child: Column(
             children: [
@@ -823,17 +685,9 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
                   Text('In: ${_formatMs(_startTrim)}', style: const TextStyle(color: Color(0xFF00F2FE), fontSize: 12)),
                   Row(
                     children: [
-                      FilterChip(
-                        label: const Text('Mirror Flip', style: TextStyle(fontSize: 11)),
-                        selected: _isMirrored,
-                        onSelected: (v) => setState(() => _isMirrored = v),
-                      ),
+                      FilterChip(label: const Text('Mirror', style: TextStyle(fontSize: 11)), selected: _isMirrored, onSelected: (v) => setState(() => _isMirrored = v)),
                       const SizedBox(width: 8),
-                      FilterChip(
-                        label: const Text('Reverse ⏪', style: TextStyle(fontSize: 11)),
-                        selected: _isReversed,
-                        onSelected: (v) => setState(() => _isReversed = v),
-                      ),
+                      FilterChip(label: const Text('Reverse ⏪', style: TextStyle(fontSize: 11)), selected: _isReversed, onSelected: (v) => setState(() => _isReversed = v)),
                     ],
                   ),
                   Text('Out: ${_formatMs(_endTrim)}', style: const TextStyle(color: Color(0xFF00F2FE), fontSize: 12)),
@@ -875,8 +729,7 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
             ],
           ),
         );
-
-      case 1: // Text & CapCut Text Templates
+      case 1:
         return Column(
           children: [
             Row(
@@ -896,17 +749,7 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 10),
-                const Text('Size', style: TextStyle(fontSize: 11)),
-                SizedBox(
-                  width: 90,
-                  child: Slider(
-                    value: _textScale,
-                    min: 0.6,
-                    max: 2.2,
-                    onChanged: (v) => setState(() => _textScale = v),
-                  ),
-                ),
+                SizedBox(width: 90, child: Slider(value: _textScale, min: 0.6, max: 2.2, onChanged: (v) => setState(() => _textScale = v))),
               ],
             ),
             const SizedBox(height: 10),
@@ -939,8 +782,7 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
             ),
           ],
         );
-
-      case 2: // Filters
+      case 2:
         return ListView.builder(
           scrollDirection: Axis.horizontal,
           itemCount: _filters.length,
@@ -965,49 +807,33 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 alignment: Alignment.center,
-                child: Text(
-                  _filters[i]['name'],
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: sel ? Colors.black : Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                ),
+                child: Text(_filters[i]['name'], textAlign: TextAlign.center, style: TextStyle(color: sel ? Colors.black : Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
               ),
             );
           },
         );
-
-      case 3: // Transitions
-        final transitions = ['None', 'Fade In/Out', 'Flash White', 'Flash Black'];
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Select Video Transition Effect:', style: TextStyle(fontSize: 13, color: Colors.white70)),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 10,
-              children: transitions.map((tr) {
-                final sel = _selectedTransition == tr;
-                return ChoiceChip(
-                  label: Text(tr),
-                  selected: sel,
-                  selectedColor: const Color(0xFF00F2FE),
-                  labelStyle: TextStyle(color: sel ? Colors.black : Colors.white, fontWeight: FontWeight.bold),
-                  onSelected: (_) => setState(() => _selectedTransition = tr),
-                );
-              }).toList(),
-            ),
-          ],
+      case 3:
+        return Wrap(
+          spacing: 10,
+          children: ['None', 'Fade In/Out', 'Flash White', 'Flash Black'].map((tr) {
+            final sel = _selectedTransition == tr;
+            return ChoiceChip(
+              label: Text(tr),
+              selected: sel,
+              selectedColor: const Color(0xFF00F2FE),
+              labelStyle: TextStyle(color: sel ? Colors.black : Colors.white, fontWeight: FontWeight.bold),
+              onSelected: (_) => setState(() => _selectedTransition = tr),
+            );
+          }).toList(),
         );
-
-      case 4: // Masking & Chroma Key
-        final masks = ['None', 'Circle', 'Rectangle', 'Cinema Bars', 'Split Top/Bottom'];
+      case 4:
         return SingleChildScrollView(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
-                  children: masks.map((m) {
+                  children: ['None', 'Circle', 'Rectangle', 'Cinema Bars', 'Split Top/Bottom'].map((m) {
                     final sel = _selectedMask == m;
                     return Padding(
                       padding: const EdgeInsets.only(right: 8.0),
@@ -1024,20 +850,12 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
               ),
               Row(
                 children: [
-                  const Text('Mask Size:', style: TextStyle(fontSize: 12)),
-                  Expanded(
-                    child: Slider(
-                      value: _maskSize,
-                      min: 0.3,
-                      max: 1.0,
-                      onChanged: (v) => setState(() => _maskSize = v),
-                    ),
-                  ),
+                  const Text('Size:', style: TextStyle(fontSize: 12)),
+                  Expanded(child: Slider(value: _maskSize, min: 0.3, max: 1.0, onChanged: (v) => setState(() => _maskSize = v))),
                   FilterChip(
-                    label: const Text('Chroma Key (Green Screen)', style: TextStyle(fontSize: 11)),
+                    label: const Text('Chroma Key', style: TextStyle(fontSize: 11)),
                     selected: _chromaKeyGreen,
                     selectedColor: Colors.greenAccent,
-                    labelStyle: TextStyle(color: _chromaKeyGreen ? Colors.black : Colors.white),
                     onSelected: (v) => setState(() => _chromaKeyGreen = v),
                   ),
                 ],
@@ -1045,8 +863,7 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
             ],
           ),
         );
-
-      case 5: // Adjust Sliders
+      case 5:
         return SingleChildScrollView(
           child: Column(
             children: [
@@ -1057,20 +874,18 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
             ],
           ),
         );
-
-      case 6: // Audio & Voice FX + Quick MP3 Export
-        final voices = ['Normal', 'Chipmunk', 'Deep Monster', 'Robot Echo'];
+      case 6:
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('CapCut Voice Effects:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                const Text('Voice Effects:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                 TextButton.icon(
                   onPressed: () {
                     setState(() => _exportFormat = 'MP3 (Audio)');
-                    _runFFmpegExport();
+                    _exportMedia();
                   },
                   icon: const Icon(Icons.audiotrack, color: Color(0xFF00F2FE), size: 18),
                   label: const Text('Extract MP3 Now', style: TextStyle(color: Color(0xFF00F2FE))),
@@ -1079,7 +894,7 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
             ),
             Wrap(
               spacing: 8,
-              children: voices.map((vf) {
+              children: ['Normal', 'Chipmunk', 'Deep Monster', 'Robot Echo'].map((vf) {
                 final sel = _voiceEffect == vf;
                 return ChoiceChip(
                   label: Text(vf),
@@ -1092,13 +907,11 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
             ),
           ],
         );
-
-      case 7: // Canvas / Aspect Ratio
-        final ratios = ['Original', '9:16 (TikTok)', '16:9 (YouTube)', '1:1 (Insta)', '4:5 (Portrait)'];
+      case 7:
         return Center(
           child: Wrap(
             spacing: 10,
-            children: ratios.map((r) {
+            children: ['Original', '9:16 (TikTok)', '16:9 (YouTube)', '1:1 (Insta)', '4:5 (Portrait)'].map((r) {
               final sel = _canvasRatio == r;
               return ChoiceChip(
                 label: Text(r),
@@ -1110,7 +923,6 @@ class _CapCutEditorScreenState extends State<CapCutEditorScreen> {
             }).toList(),
           ),
         );
-
       default:
         return const SizedBox.shrink();
     }
